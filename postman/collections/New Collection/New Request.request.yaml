@@ -1,0 +1,15 @@
+$kind: http-request
+name: Login
+url: 'http://localhost/flow_backend/auth/login.php'
+method: POST
+order: 1000
+headers:
+  - key: Content-Type
+    value: application/json
+body:
+  type: json
+  content: |-
+    {
+        "email": "katherine96@gmail.com",
+        "password": "thambithappu"
+    }
