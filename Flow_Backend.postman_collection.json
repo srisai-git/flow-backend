@@ -1,0 +1,666 @@
+{
+  "info": {
+    "_postman_id": "b78912ef-34c5-4d7a-9a0e-8f2c416e7891",
+    "name": "Flow Backend API",
+    "description": "Ready-to-import Postman collection for Flow PHP backend (PDO/MySQL) running on local XAMPP.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost/flow_backend",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "3",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Signup (Register User)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test(\"Registration successful with user_id\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "    pm.expect(jsonData).to.have.property(\"user_id\");",
+                  "    if (jsonData.user_id) {",
+                  "        pm.collectionVariables.set(\"user_id\", jsonData.user_id);",
+                  "        console.log(\"Saved user_id: \" + jsonData.user_id);",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Flow User\",\n  \"email\": \"test_flow@example.com\",\n  \"password\": \"Password123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/signup.php",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "signup.php"
+              ]
+            },
+            "description": "Registers a new user with name, email, and password (bcrypt)."
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Login successful and returns user object\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "    pm.expect(jsonData.user).to.be.an(\"object\");",
+                  "    if (jsonData.user && jsonData.user.id) {",
+                  "        pm.collectionVariables.set(\"user_id\", jsonData.user.id);",
+                  "        console.log(\"Updated user_id from login: \" + jsonData.user.id);",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"sai123@gmail.com\",\n  \"password\": \"Password123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login.php",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login.php"
+              ]
+            },
+            "description": "Authenticates user using email and password."
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Password",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Password reset confirmation\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"sai123@gmail.com\",\n  \"new_password\": \"NewSecretPassword123!\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/reset_password.php",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "reset_password.php"
+              ]
+            },
+            "description": "Directly updates a user's password using email and new_password."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Profile Management",
+      "item": [
+        {
+          "name": "Setup Profile (Multipart with Image)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Profile updated with avatar path\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "    pm.expect(jsonData.data.name).to.be.a(\"string\");",
+                  "    pm.expect(jsonData.data.avatar).to.be.a(\"string\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "user_id",
+                  "value": "{{user_id}}",
+                  "description": "ID of user to update",
+                  "type": "text"
+                },
+                {
+                  "key": "name",
+                  "value": "Sai Kumar",
+                  "description": "Updated display name",
+                  "type": "text"
+                },
+                {
+                  "key": "bio",
+                  "value": "Android & Full Stack Developer | Flow App",
+                  "description": "Bio description",
+                  "type": "text"
+                },
+                {
+                  "key": "profile_image",
+                  "description": "Select image file (.jpg, .jpeg, .png, .webp)",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/profile/setup_profile.php",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "profile",
+                "setup_profile.php"
+              ]
+            },
+            "description": "Updates profile details and uploads avatar using multipart/form-data. In Postman, click on profile_image to select a file from your machine."
+          },
+          "response": []
+        },
+        {
+          "name": "Setup Profile (Text Only - No Image)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Profile updated successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "user_id",
+                  "value": "{{user_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "name",
+                  "value": "Sai Kumar Updated",
+                  "type": "text"
+                },
+                {
+                  "key": "bio",
+                  "value": "Updated bio without changing avatar",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/profile/setup_profile.php",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "profile",
+                "setup_profile.php"
+              ]
+            },
+            "description": "Updates name and bio without uploading a new image (retains existing avatar)."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Profile (GET with query param)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Returns profile payload\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "    pm.expect(jsonData.data).to.have.property(\"id\");",
+                  "    pm.expect(jsonData.data).to.have.property(\"name\");",
+                  "    pm.expect(jsonData.data).to.have.property(\"avatar\");",
+                  "    pm.expect(jsonData.data).to.have.property(\"bio\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/profile/get_profile.php?id={{user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "profile",
+                "get_profile.php"
+              ],
+              "query": [
+                {
+                  "key": "id",
+                  "value": "{{user_id}}"
+                }
+              ]
+            },
+            "description": "Fetches profile data by user ID using HTTP GET query parameter."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Profile (POST url-encoded)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Returns profile payload\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "id",
+                  "value": "{{user_id}}",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/profile/get_profile.php",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "profile",
+                "get_profile.php"
+              ]
+            },
+            "description": "Fetches profile data by user ID using HTTP POST with application/x-www-form-urlencoded."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Routine Preferences (\"Make it yours\")",
+      "item": [
+        {
+          "name": "Setup / Check Preferences Table",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Table setup status is true\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/preferences/setup_table.php",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "preferences",
+                "setup_table.php"
+              ]
+            },
+            "description": "Verifies or creates the user_preferences table."
+          },
+          "response": []
+        },
+        {
+          "name": "Save Routine Preferences",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Preferences saved successfully\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "    pm.expect(jsonData.data.user_id).to.eql(Number(pm.collectionVariables.get(\"user_id\") || 3));",
+                  "    pm.expect(jsonData.data.primary_goal).to.eql(\"Work\");",
+                  "    pm.expect(jsonData.data.preferred_focus_duration).to.eql(45);",
+                  "    pm.expect(jsonData.data.daily_focus_goal_minutes).to.eql(210);",
+                  "    pm.expect(jsonData.data.reminders_enabled).to.eql(1);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}},\n  \"name\": \"Sai Kumar\",\n  \"primary_goal\": \"Work\",\n  \"preferred_focus_duration\": 45,\n  \"daily_focus_goal_minutes\": 210,\n  \"reminders_enabled\": 1,\n  \"reminder_time\": \"09:00 AM\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/preferences/save_preferences.php",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "preferences",
+                "save_preferences.php"
+              ]
+            },
+            "description": "Saves or updates daily routine preferences and optionally updates the user display name."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Routine Preferences (GET)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Routine preferences retrieved\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "    pm.expect(jsonData.data).to.have.property(\"primary_goal\");",
+                  "    pm.expect(jsonData.data).to.have.property(\"preferred_focus_duration\");",
+                  "    pm.expect(jsonData.data).to.have.property(\"daily_focus_goal_minutes\");",
+                  "    pm.expect(jsonData.data).to.have.property(\"reminders_enabled\");",
+                  "    pm.expect(jsonData.data).to.have.property(\"reminder_time\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/preferences/get_preferences.php?user_id={{user_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "preferences",
+                "get_preferences.php"
+              ],
+              "query": [
+                {
+                  "key": "user_id",
+                  "value": "{{user_id}}"
+                }
+              ]
+            },
+            "description": "Fetches routine preferences using GET with ?user_id={{user_id}}. Falls back to defaults if not set yet."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Routine Preferences (POST)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Routine preferences retrieved via POST\", function () {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql(true);",
+                  "    pm.expect(jsonData.data).to.have.property(\"primary_goal\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/preferences/get_preferences.php",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "preferences",
+                "get_preferences.php"
+              ]
+            },
+            "description": "Fetches routine preferences using POST with JSON payload containing user_id."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
