@@ -1,0 +1,616 @@
+{
+  "info": {
+    "_postman_id": "c9a012de-45b6-4f8a-8b1e-9f3a527c8902",
+    "name": "Flow Backend - Complete API Suite",
+    "description": "Comprehensive Postman Collection v2.1 covering all Flow backend modules: Migrations, Auth, Profile, Routine Preferences, Tasks, Focus Sessions, Insights & Analytics, and Workspace Dashboard.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost/flow_backend",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "3",
+      "type": "string"
+    },
+    {
+      "key": "task_id",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. System & Migrations",
+      "item": [
+        {
+          "name": "Run Database Migrations",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"All tables created/verified\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "    pm.expect(json.data.tables_checked).to.include.members(['user_preferences', 'tasks', 'focus_sessions', 'app_settings']);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/run_migrations.php",
+              "host": ["{{base_url}}"],
+              "path": ["run_migrations.php"]
+            },
+            "description": "Self-executes idempotent migrations to create/verify all database tables."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Authentication",
+      "item": [
+        {
+          "name": "Signup (Register User)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Registration successful with user_id\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "    pm.expect(json).to.have.property(\"user_id\");",
+                  "    if (json.user_id) {",
+                  "        pm.collectionVariables.set(\"user_id\", String(json.user_id));",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sai Kumar\",\n  \"email\": \"sai_dev@example.com\",\n  \"password\": \"Password123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/signup.php",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "signup.php"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Login successful\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "    if (json.user && json.user.id) {",
+                  "        pm.collectionVariables.set(\"user_id\", String(json.user.id));",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"sai123@gmail.com\",\n  \"password\": \"Password123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login.php",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login.php"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reset Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"sai123@gmail.com\",\n  \"new_password\": \"NewSecretPass123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/reset_password.php",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "reset_password.php"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Profile Management",
+      "item": [
+        {
+          "name": "Setup Profile (Multipart with Image)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "user_id", "value": "{{user_id}}", "type": "text" },
+                { "key": "name", "value": "Sai Kumar", "type": "text" },
+                { "key": "bio", "value": "Senior Android & Backend Engineer", "type": "text" },
+                { "key": "profile_image", "type": "file", "src": [] }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/profile/setup_profile.php",
+              "host": ["{{base_url}}"],
+              "path": ["profile", "setup_profile.php"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Profile (GET)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/profile/get_profile.php?id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["profile", "get_profile.php"],
+              "query": [{ "key": "id", "value": "{{user_id}}" }]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Routine Preferences (\"Make it yours\")",
+      "item": [
+        {
+          "name": "Save Routine Preferences",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Preferences updated\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "    pm.expect(json.data.primary_goal).to.eql(\"Work\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}},\n  \"name\": \"Sai Kumar\",\n  \"primary_goal\": \"Work\",\n  \"preferred_focus_duration\": 45,\n  \"daily_focus_goal_minutes\": 210,\n  \"reminders_enabled\": 1,\n  \"reminder_time\": \"09:00 AM\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/preferences/save_preferences.php",
+              "host": ["{{base_url}}"],
+              "path": ["preferences", "save_preferences.php"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Routine Preferences",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/preferences/get_preferences.php?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["preferences", "get_preferences.php"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Tasks Management",
+      "item": [
+        {
+          "name": "Create Task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Task created with id\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "    pm.expect(json.data).to.have.property(\"id\");",
+                  "    pm.collectionVariables.set(\"task_id\", String(json.data.id));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}},\n  \"title\": \"Implement Flow Backend Endpoints\",\n  \"description\": \"Build and verify all 5 core modules with PDO\",\n  \"category\": \"Development\",\n  \"priority\": \"high\",\n  \"due_date\": \"2026-10-30\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/tasks/create_task.php",
+              "host": ["{{base_url}}"],
+              "path": ["tasks", "create_task.php"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Tasks (All)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasks/get_tasks.php?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["tasks", "get_tasks.php"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Tasks (Filter: Pending & High Priority)",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/tasks/get_tasks.php?user_id={{user_id}}&is_completed=0&priority=high",
+              "host": ["{{base_url}}"],
+              "path": ["tasks", "get_tasks.php"],
+              "query": [
+                { "key": "user_id", "value": "{{user_id}}" },
+                { "key": "is_completed", "value": "0" },
+                { "key": "priority", "value": "high" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Task (Toggle Completed)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}},\n  \"task_id\": {{task_id}},\n  \"is_completed\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/tasks/update_task.php",
+              "host": ["{{base_url}}"],
+              "path": ["tasks", "update_task.php"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Task",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}},\n  \"task_id\": {{task_id}}\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/tasks/delete_task.php",
+              "host": ["{{base_url}}"],
+              "path": ["tasks", "delete_task.php"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Focus Sessions & Timer Logging",
+      "item": [
+        {
+          "name": "Log Focus Session (Completed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Session logged\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "    pm.expect(json.data.duration_minutes).to.eql(45);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}},\n  \"duration_minutes\": 45,\n  \"session_type\": \"deep_work\",\n  \"status\": \"completed\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/focus/log_session.php",
+              "host": ["{{base_url}}"],
+              "path": ["focus", "log_session.php"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Log Focus Session (Abandoned / Interrupted)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}},\n  \"duration_minutes\": 15,\n  \"session_type\": \"pomodoro\",\n  \"status\": \"abandoned\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/focus/log_session.php",
+              "host": ["{{base_url}}"],
+              "path": ["focus", "log_session.php"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Focus Sessions History",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/focus/get_sessions.php?user_id={{user_id}}&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["focus", "get_sessions.php"],
+              "query": [
+                { "key": "user_id", "value": "{{user_id}}" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7. Insights & Analytics",
+      "item": [
+        {
+          "name": "Get Aggregated Insights",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Valid metrics returned\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "    pm.expect(json.data).to.have.property(\"today_focus_minutes\");",
+                  "    pm.expect(json.data).to.have.property(\"week_focus_minutes\");",
+                  "    pm.expect(json.data).to.have.property(\"daily_goal_progress_percent\");",
+                  "    pm.expect(json.data).to.have.property(\"current_streak_days\");",
+                  "    pm.expect(json.data).to.have.property(\"tasks_summary\");",
+                  "    pm.expect(json.data.daily_chart_data).to.be.an(\"array\").with.lengthOf(7);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/insights/get_insights.php?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["insights", "get_insights.php"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8. Workspace & App Settings",
+      "item": [
+        {
+          "name": "Get Workspace Dashboard",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Consolidated workspace loaded\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "    pm.expect(json.data).to.have.property(\"user\");",
+                  "    pm.expect(json.data).to.have.property(\"routine_preferences\");",
+                  "    pm.expect(json.data).to.have.property(\"app_settings\");",
+                  "    pm.expect(json.data).to.have.property(\"today_summary\");",
+                  "    pm.expect(json.data).to.have.property(\"recent_tasks\");",
+                  "    pm.expect(json.data).to.have.property(\"recent_sessions\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/workspace/get_workspace.php?user_id={{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["workspace", "get_workspace.php"],
+              "query": [{ "key": "user_id", "value": "{{user_id}}" }]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update App & Groot Settings",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Settings updated\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(true);",
+                  "    pm.expect(json.data.theme).to.eql(\"dark\");",
+                  "    pm.expect(json.data.groot_suggestions_enabled).to.eql(1);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{user_id}},\n  \"theme\": \"dark\",\n  \"sound_enabled\": 1,\n  \"vibration_enabled\": 1,\n  \"groot_suggestions_enabled\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/workspace/update_settings.php",
+              "host": ["{{base_url}}"],
+              "path": ["workspace", "update_settings.php"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
+

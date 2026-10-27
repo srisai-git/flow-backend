@@ -56,8 +56,9 @@ try {
     if ($pref) {
         http_response_code(200);
         echo json_encode([
-            "status" => true,
-            "data"   => [
+            "status"  => true,
+            "message" => "Preferences retrieved successfully.",
+            "data"    => [
                 "user_id"                  => (int)$pref['user_id'],
                 "name"                     => $user['name'] ?? '',
                 "primary_goal"             => $pref['primary_goal'],
@@ -73,8 +74,9 @@ try {
         // Return default routine preferences if user hasn't saved preferences yet
         http_response_code(200);
         echo json_encode([
-            "status" => true,
-            "data"   => [
+            "status"  => true,
+            "message" => "Default routine preferences returned.",
+            "data"    => [
                 "user_id"                  => $userId,
                 "name"                     => $user['name'] ?? '',
                 "primary_goal"             => "Study",
