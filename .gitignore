@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+groot_ai/__pycache__/
+groot_ai/groot_checkpoints/
