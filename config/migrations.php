@@ -84,6 +84,17 @@ function runAllMigrations(PDO $conn): array {
     ");
     $executed[] = 'app_settings';
 
+    // 5. Ensure performance indexes for sub-10ms queries
+    try {
+        $conn->exec("CREATE INDEX idx_focus_user_created ON `focus_sessions` (`user_id`, `created_at`)");
+    } catch (PDOException $e) {}
+    try {
+        $conn->exec("CREATE INDEX idx_tasks_user_completed ON `tasks` (`user_id`, `is_completed`)");
+    } catch (PDOException $e) {}
+    try {
+        $conn->exec("CREATE INDEX idx_habit_logs_user_date ON `habit_logs` (`user_id`, `completed_date`)");
+    } catch (PDOException $e) {}
+
     return $executed;
 }
 

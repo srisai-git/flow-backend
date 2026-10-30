@@ -3,10 +3,15 @@
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/migrations.php';
 
-try {
-    runAllMigrations($conn);
-} catch (PDOException $e) {
-    error_log("Dashboard Migration Error: " . $e->getMessage());
+// Fast migration cache check to eliminate schema catalog locking on every API hit
+$migrationFlag = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow_migrated_v3';
+if (!file_exists($migrationFlag)) {
+    try {
+        runAllMigrations($conn);
+        @touch($migrationFlag);
+    } catch (PDOException $e) {
+        error_log("Dashboard Migration Error: " . $e->getMessage());
+    }
 }
 
 $userId = (int)($_GET['user_id'] ?? $_POST['user_id'] ?? 1);

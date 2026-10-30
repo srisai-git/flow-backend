@@ -36,13 +36,17 @@ $isProductivityQuery = preg_match('/\b(focus|habit|habits|streak|streaks|task|ta
 $productivityContext = "";
 if ($isProductivityQuery && $userId > 0 && isset($conn)) {
     try {
-        $stmtToday = $conn->prepare("SELECT COALESCE(SUM(duration_minutes), 0) FROM focus_sessions WHERE user_id = :uid AND status = 'completed' AND (DATE(created_at) = CURDATE() OR DATE(completed_at) = CURDATE())");
-        $stmtToday->execute([':uid' => $userId]);
-        $focusToday = (int)$stmtToday->fetchColumn();
-
-        $stmtWeek = $conn->prepare("SELECT COALESCE(SUM(duration_minutes), 0) FROM focus_sessions WHERE user_id = :uid AND status = 'completed' AND (created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) OR completed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY))");
-        $stmtWeek->execute([':uid' => $userId]);
-        $focusWeek = (int)$stmtWeek->fetchColumn();
+        $stmtFocus = $conn->prepare("
+            SELECT 
+                COALESCE(SUM(CASE WHEN (DATE(created_at) = CURDATE() OR DATE(completed_at) = CURDATE()) THEN duration_minutes ELSE 0 END), 0) AS focus_today,
+                COALESCE(SUM(CASE WHEN (created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) OR completed_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) THEN duration_minutes ELSE 0 END), 0) AS focus_week
+            FROM focus_sessions
+            WHERE user_id = :uid AND status = 'completed'
+        ");
+        $stmtFocus->execute([':uid' => $userId]);
+        $fMetrics = $stmtFocus->fetch();
+        $focusToday = (int)($fMetrics['focus_today'] ?? 0);
+        $focusWeek = (int)($fMetrics['focus_week'] ?? 0);
 
         $stmtTasks = $conn->prepare("SELECT 
             COUNT(CASE WHEN is_completed = 1 THEN 1 END) AS completed_count,
