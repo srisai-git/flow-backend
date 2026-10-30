@@ -66,5 +66,36 @@ def ask_groot(req: ChatRequest):
     # Remove any trailing ChatML end tags if present
     reply = reply.replace("<|im_end|>", "").strip()
     
-    return {"success": True, "reply": reply}
-    
+    return {"success": True, "reply": reply, "insight": reply}
+
+@app.post("/generate")
+def generate(req: dict):
+    msg = req.get("message") or req.get("prompt") or ""
+    return ask_groot(ChatRequest(message=msg))
+
+@app.post("/v1/chat/completions")
+def chat_completions(req: dict):
+    messages = req.get("messages", [])
+    user_msg = ""
+    for m in messages:
+        if m.get("role") == "user":
+            user_msg = m.get("content", "")
+    if not user_msg:
+        user_msg = req.get("prompt", "")
+    res = ask_groot(ChatRequest(message=user_msg))
+    return {
+        "id": "chatcmpl-groot",
+        "object": "chat.completion",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": res["reply"]
+                },
+                "finish_reason": "stop"
+            }
+        ],
+        "insight": res["reply"],
+        "reply": res["reply"]
+    }
