@@ -82,7 +82,7 @@ CREATE TABLE `habits` (
   `id` int(11) NOT NULL,
   `user_id` int(11) NOT NULL,
   `title` varchar(255) NOT NULL,
-  `icon` varchar(50) NOT NULL DEFAULT '⚡',
+  `icon` varchar(50) NOT NULL DEFAULT '',
   `frequency` varchar(50) NOT NULL DEFAULT 'daily',
   `streak_count` int(11) NOT NULL DEFAULT 0,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
@@ -93,12 +93,12 @@ CREATE TABLE `habits` (
 --
 
 INSERT INTO `habits` (`id`, `user_id`, `title`, `icon`, `frequency`, `streak_count`, `created_at`) VALUES
-(1, 7, 'Deep Focus Session', '⚡', 'daily', 5, '2026-10-29 07:07:41'),
-(2, 7, 'Read Technical Docs', '📖', 'daily', 3, '2026-10-29 07:07:41'),
-(3, 7, 'Daily Code Review', '💻', 'daily', 2, '2026-10-29 07:07:41'),
-(4, 10, 'Deep Focus Session', '⚡', 'daily', 1, '2026-10-29 07:12:05'),
-(5, 10, 'Read Technical Docs', '📖', 'daily', 1, '2026-10-29 07:12:05'),
-(6, 10, 'Daily Code Review', '💻', 'daily', 0, '2026-10-29 07:12:05'),
+(1, 7, 'Deep Focus Session', '', 'daily', 5, '2026-10-29 07:07:41'),
+(2, 7, 'Read Technical Docs', '', 'daily', 3, '2026-10-29 07:07:41'),
+(3, 7, 'Daily Code Review', '', 'daily', 2, '2026-10-29 07:07:41'),
+(4, 10, 'Deep Focus Session', '', 'daily', 1, '2026-10-29 07:12:05'),
+(5, 10, 'Read Technical Docs', '', 'daily', 1, '2026-10-29 07:12:05'),
+(6, 10, 'Daily Code Review', '', 'daily', 0, '2026-10-29 07:12:05'),
 (7, 10, 'read', 'repeat', 'weekly', 0, '2026-10-29 08:33:20');
 
 -- --------------------------------------------------------
@@ -182,7 +182,7 @@ INSERT INTO `users` (`id`, `name`, `avatar`, `bio`, `email`, `phone`, `password`
 (4, 'dev', NULL, NULL, 'dev321@gmail.com', NULL, '$2y$10$LnM7wDdwQ.kJF04YBkQrq.x7aAhI1e5xnZfJ3I7R9GWex1fW.VD3S', NULL, NULL, 0, '2026-10-26 06:54:54'),
 (5, 'Flow User', NULL, NULL, 'test_flow@example.com', NULL, '$2y$10$RObxKsnYX6HI3kN7sslcA.bcCr5xhsdHDMA6TNguCer3lB0FZnBtu', NULL, NULL, 0, '2026-10-27 08:33:52'),
 (6, 'Sai Kumar', NULL, NULL, 'sai_dev@example.com', NULL, '$2y$10$8x1jUl2Y7UhyXJXwBeP4WuSeBNMu82udHBtUNaJoLcS5s9WOzpAcK', NULL, NULL, 0, '2026-10-27 09:26:26'),
-(7, 'YUVANDHAN', '👤', 'Deep work enthusiast & Computer Science researcher', 'yuvadhamsubah@gmail.com', NULL, '$2y$10$/oIo/Fm2fRUmjK9HsejCGu2GQ5AN9GZMEoiloajIombAMNV4bv7zK', NULL, NULL, 0, '2026-10-28 02:54:20'),
+(7, 'YUVANDHAN', '', 'Deep work enthusiast & Computer Science researcher', 'yuvadhamsubah@gmail.com', NULL, '$2y$10$/oIo/Fm2fRUmjK9HsejCGu2GQ5AN9GZMEoiloajIombAMNV4bv7zK', NULL, NULL, 0, '2026-10-28 02:54:20'),
 (8, 'sri sai', NULL, NULL, 'saiprince7329@gmail.com', NULL, '$2y$10$UIOvK7MeoflFeJ./YAY79uv0D6aOiFu1KFWFCYOEIFbPRh.dUxpTK', NULL, NULL, 0, '2026-10-29 04:34:34'),
 (9, 'Kishore', NULL, NULL, 'kishore12345@gmail.com', NULL, '$2y$10$ysvW124uOxRW.DKZu9z87udxaOgRmHacb46rjd/30W9NQ/ML8ISTu', NULL, NULL, 0, '2026-10-29 04:40:44'),
 (10, 'Sri Sai', 'content://media/picker_get_content/0/com.android.providers.media.photopicker/media/45337', 'Student', 'jp123@gmail.com', NULL, '$2y$10$3DXY9hL/IPLnanX8mepmYeadULQH.uAhn1VgsG/8DDpv6UTJcJbT2', NULL, NULL, 0, '2026-10-29 05:01:43');
@@ -211,7 +211,7 @@ CREATE TABLE `user_preferences` (
 INSERT INTO `user_preferences` (`id`, `user_id`, `primary_goal`, `preferred_focus_duration`, `daily_focus_goal_minutes`, `reminders_enabled`, `reminder_time`, `updated_at`) VALUES
 (1, 3, 'Work', 45, 210, 1, '09:00 AM', '2026-10-27 09:27:25'),
 (3, 7, 'Work', 60, 120, 1, '06:00 AM', '2026-10-28 03:07:13'),
-(8, 10, '💻 Coding & Projects', 50, 180, 1, '09:00 AM', '2026-10-29 05:02:50');
+(8, 10, ' Coding & Projects', 50, 180, 1, '09:00 AM', '2026-10-29 05:02:50');
 
 --
 -- Indexes for dumped tables

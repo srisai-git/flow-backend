@@ -66,6 +66,10 @@ try {
     if (!empty($avatar)) {
         $fields[] = "avatar = :avatar";
         $params[':avatar'] = $avatar;
+        try {
+            $fields[] = "avatar_url = :avatar_url";
+            $params[':avatar_url'] = $avatar;
+        } catch (PDOException $e) {}
     }
 
     $sql = "UPDATE users SET " . implode(", ", $fields) . " WHERE id = :id";
@@ -107,6 +111,7 @@ try {
     $fetchStmt = $conn->prepare("SELECT id, name, email, avatar, bio, created_at FROM users WHERE id = :id LIMIT 1");
     $fetchStmt->execute([':id' => $userId]);
     $updatedUser = $fetchStmt->fetch();
+    $savedAvatar = $updatedUser['avatar'] ?? $avatar;
 
     http_response_code(200);
     echo json_encode([
@@ -116,8 +121,8 @@ try {
             "id" => (int)($updatedUser['id'] ?? $userId),
             "name" => $updatedUser['name'] ?? $name,
             "email" => $updatedUser['email'] ?? $email,
-            "avatar" => $updatedUser['avatar'] ?? $avatar,
-            "avatar_url" => $updatedUser['avatar'] ?? $avatar,
+            "avatar" => $savedAvatar,
+            "avatar_url" => $savedAvatar,
             "bio" => $updatedUser['bio'] ?? $bio,
             "created_at" => $updatedUser['created_at'] ?? date("Y-m-d H:i:s")
         ]

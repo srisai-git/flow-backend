@@ -5,7 +5,15 @@
 function runAllMigrations(PDO $conn): array {
     $executed = [];
 
-    // 1. Table: user_preferences
+    // 1. Ensure users table has avatar columns
+    try {
+        $conn->exec("ALTER TABLE `users` ADD COLUMN `avatar` VARCHAR(512) DEFAULT NULL");
+    } catch (PDOException $e) {}
+    try {
+        $conn->exec("ALTER TABLE `users` ADD COLUMN `avatar_url` VARCHAR(512) DEFAULT NULL");
+    } catch (PDOException $e) {}
+
+    // 2. Table: user_preferences
     $conn->exec("
         CREATE TABLE IF NOT EXISTS `user_preferences` (
             `id` INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
