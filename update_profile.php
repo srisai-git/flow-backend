@@ -21,7 +21,7 @@ $userId = (int)($_POST['user_id'] ?? $input['user_id'] ?? 0);
 $name = trim($_POST['name'] ?? $input['name'] ?? '');
 $email = trim($_POST['email'] ?? $input['email'] ?? '');
 $bio = trim($_POST['bio'] ?? $input['bio'] ?? '');
-$avatar = trim($_POST['avatar'] ?? $input['avatar'] ?? '');
+$avatar = trim($_POST['avatar'] ?? $input['avatar'] ?? $_POST['avatar_url'] ?? $input['avatar_url'] ?? '');
 
 if ($userId <= 0) {
     http_response_code(400);
@@ -117,6 +117,7 @@ try {
             "name" => $updatedUser['name'] ?? $name,
             "email" => $updatedUser['email'] ?? $email,
             "avatar" => $updatedUser['avatar'] ?? $avatar,
+            "avatar_url" => $updatedUser['avatar'] ?? $avatar,
             "bio" => $updatedUser['bio'] ?? $bio,
             "created_at" => $updatedUser['created_at'] ?? date("Y-m-d H:i:s")
         ]
@@ -130,4 +131,3 @@ try {
     ]);
 }
 ?>
-

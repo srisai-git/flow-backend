@@ -9,9 +9,54 @@ try {
     error_log("Session Migration Error: " . $e->getMessage());
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    $userId = (int)($_GET['user_id'] ?? 1);
+    $limit  = (int)($_GET['limit'] ?? 20);
+    if ($limit <= 0 || $limit > 100) $limit = 20;
+
+    try {
+        $stmt = $conn->prepare("
+            SELECT s.id, s.user_id, s.task_id, s.duration_minutes, s.session_type, s.status, s.started_at, s.completed_at, s.created_at,
+                   t.title AS task_title, t.category AS task_category
+            FROM focus_sessions s
+            LEFT JOIN tasks t ON s.task_id = t.id
+            WHERE s.user_id = :uid
+            ORDER BY s.id DESC
+            LIMIT :lim
+        ");
+        $stmt->bindValue(':uid', $userId, PDO::PARAM_INT);
+        $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        $sessions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            "status" => true,
+            "data" => array_map(function($s) {
+                return [
+                    "id" => (int)$s['id'],
+                    "user_id" => (int)$s['user_id'],
+                    "task_id" => $s['task_id'] !== null ? (int)$s['task_id'] : null,
+                    "duration_minutes" => (int)$s['duration_minutes'],
+                    "session_type" => $s['session_type'] ?: 'pomodoro',
+                    "status" => $s['status'] ?: 'completed',
+                    "started_at" => $s['started_at'] ?: $s['created_at'],
+                    "completed_at" => $s['completed_at'] ?: $s['created_at'],
+                    "task_title" => $s['task_title'] ?: '',
+                    "task_category" => $s['task_category'] ?: ''
+                ];
+            }, $sessions)
+        ]);
+        exit;
+    } catch (PDOException $e) {
+        http_response_code(500);
+        echo json_encode(["status" => false, "message" => "Database error: " . $e->getMessage()]);
+        exit;
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
-    echo json_encode(["status" => false, "message" => "Method not allowed. Use POST."]);
+    echo json_encode(["status" => false, "message" => "Method not allowed. Use GET or POST."]);
     exit;
 }
 
@@ -61,4 +106,3 @@ try {
     http_response_code(500);
     echo json_encode(["status" => false, "message" => "Database error: " . $e->getMessage()]);
 }
-

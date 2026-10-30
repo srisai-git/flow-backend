@@ -97,6 +97,7 @@ try {
             "name" => $user['name'] ?: "Sri Sai",
             "email" => $user['email'] ?: "sri.sai@example.com",
             "avatar" => $user['avatar'] ?: "",
+            "avatar_url" => $user['avatar'] ?: "",
             "bio" => $user['bio'] ?: "Deep work enthusiast & Computer Science researcher",
             "created_at" => $user['created_at'] ?: date("Y-m-d H:i:s"),
             "member_since" => "Member since " . $memberSince,
@@ -118,4 +119,3 @@ try {
     ]);
 }
 ?>
-

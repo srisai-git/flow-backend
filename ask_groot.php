@@ -58,27 +58,31 @@ $habitsTodayDone = (int)$stmtHabitsToday->fetchColumn();
 // Metrics summary string for AI
 $metricsSummary = "Focus time today: {$focusToday} mins; Focus time past 7 days: {$focusWeek} mins; Tasks completed: {$tasksCompleted}; Pending tasks backlog: {$tasksPending}; Active habit streak: {$maxStreak} days; Today's habits finished: {$habitsTodayDone}/{$totalHabits}.";
 
-// 2. Construct context-aware system & user prompt
-$systemInstruction = "You are Groot, an intelligent, minimalist productivity coach for the FocusFlow app. Analyze the user's real productivity metrics: $metricsSummary. Give concise, actionable, and encouraging feedback in 2-3 sentences. Do not use emojis.";
+// 2. Construct versatile system prompt & user prompt
+$systemInstruction = "You are Groot, an intelligent, versatile, and thoughtful AI assistant integrated into FocusFlow. While your specialty is productivity, time management, and habit optimization, you can intelligently assist the user with any technical, academic, coding, creative, or general question they ask. Keep answers insightful, clear, and direct. Do not use emojis.";
+$metricsContext = "User background focus metrics: $metricsSummary";
 
-$fullMessage = $systemInstruction;
+$fullMessage = $systemInstruction . "\n\n" . $metricsContext;
 if (!empty($userPrompt)) {
-    $fullMessage .= "\nUser query: " . $userPrompt;
+    $fullMessage .= "\n\nUser Question/Message: " . $userPrompt;
 } else if ($queryType === 'habit_insights') {
-    $fullMessage .= "\nAnalyze my habit consistency and provide 2-3 actionable sentences on compounding my daily routines.";
+    $fullMessage .= "\n\nUser Question/Message: Analyze my habit consistency and provide 2-3 actionable sentences on compounding my daily routines.";
 } else if ($queryType === 'daily_summary') {
-    $fullMessage .= "\nProvide a brief daily summary of my focus time and tasks progress today.";
+    $fullMessage .= "\n\nUser Question/Message: Provide a brief daily summary of my focus time and tasks progress today.";
 } else if ($queryType === 'focus_advice') {
-    $fullMessage .= "\nProvide advice on optimizing my focus blocks and session rhythm based on my logged minutes.";
+    $fullMessage .= "\n\nUser Question/Message: Provide advice on optimizing my focus blocks and session rhythm based on my logged minutes.";
+} else {
+    $fullMessage .= "\n\nUser Question/Message: Provide a brief productivity check-in.";
 }
 
 // 3. Attempt cURL forward to local fine-tuned model running on port 8000
+$effectivePrompt = !empty($userPrompt) ? $userPrompt : "Analyze my productivity metrics.";
 $endpoints = [
-    "http://127.0.0.1:8000/ask_groot" => json_encode(["message" => $fullMessage]),
+    "http://127.0.0.1:8000/ask_groot" => json_encode(["message" => $fullMessage, "prompt" => $fullMessage]),
     "http://127.0.0.1:8000/v1/chat/completions" => json_encode([
         "messages" => [
-            ["role" => "system", "content" => $systemInstruction],
-            ["role" => "user", "content" => !empty($userPrompt) ? $userPrompt : "Analyze my productivity metrics."]
+            ["role" => "system", "content" => $systemInstruction . "\n\n" . $metricsContext],
+            ["role" => "user", "content" => $effectivePrompt]
         ]
     ]),
     "http://127.0.0.1:8000/generate" => json_encode(["prompt" => $fullMessage])
@@ -121,7 +125,9 @@ foreach ($endpoints as $url => $payload) {
 // 4. If local model server on port 8000 is unreachable or returned empty,
 // generate an authentic rule-based coaching insight based directly on the user's real DB stats!
 if (empty($aiResponseText)) {
-    if ($queryType === 'habit_insights') {
+    if (!empty($userPrompt) && $queryType !== 'habit_insights' && $queryType !== 'focus_advice' && $queryType !== 'daily_summary') {
+        $aiResponseText = "Regarding your query: '{$userPrompt}' - Break the problem into incremental sub-goals, eliminate peripheral distractions, and dedicate a focused block of time. You currently have {$tasksPending} pending tasks and {$focusToday} focus minutes logged today.";
+    } elseif ($queryType === 'habit_insights') {
         if ($maxStreak > 0) {
             $aiResponseText = "You have maintained an active habit streak of {$maxStreak} days with {$habitsTodayDone} of {$totalHabits} daily routines completed today. Keep compounding this consistency to lock in your long-term focus.";
         } else {

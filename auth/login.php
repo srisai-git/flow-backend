@@ -19,19 +19,23 @@ if (empty($email) || empty($password)) {
 }
 
 try {
-    $stmt = $conn->prepare("SELECT id, name, email, password FROM users WHERE email = :email LIMIT 1");
+    $stmt = $conn->prepare("SELECT id, name, email, avatar, bio, password FROM users WHERE email = :email LIMIT 1");
     $stmt->execute([':email' => $email]);
     $user = $stmt->fetch();
 
     if ($user && password_verify($password, $user['password'])) {
+        $avatarVal = $user['avatar'] ?? '';
         http_response_code(200);
         echo json_encode([
             "status"  => true,
             "message" => "Login successful.",
             "user"    => [
-                "id"    => $user['id'],
-                "name"  => $user['name'],
-                "email" => $user['email']
+                "id"         => (int)$user['id'],
+                "name"       => $user['name'],
+                "email"      => $user['email'],
+                "avatar"     => $avatarVal,
+                "avatar_url" => $avatarVal,
+                "bio"        => $user['bio'] ?? ''
             ]
         ]);
     } else {

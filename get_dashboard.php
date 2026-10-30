@@ -12,11 +12,12 @@ try {
 $userId = (int)($_GET['user_id'] ?? $_POST['user_id'] ?? 1);
 
 try {
-    // 1. Get user name
-    $uStmt = $conn->prepare("SELECT name FROM users WHERE id = :id LIMIT 1");
+    // 1. Get user name & avatar
+    $uStmt = $conn->prepare("SELECT name, avatar FROM users WHERE id = :id LIMIT 1");
     $uStmt->execute([':id' => $userId]);
     $user = $uStmt->fetch();
     $userName = $user ? $user['name'] : "Sri Sai";
+    $userAvatar = $user ? ($user['avatar'] ?? '') : "";
 
     // 2. Get today's total focus minutes
     $focusStmt = $conn->prepare("
@@ -94,15 +95,32 @@ try {
     $streakStmt->execute([':uid' => $userId]);
     $streakDays = max(1, (int)$streakStmt->fetchColumn());
 
+    // 8. Longest streak, total habits completed, total focus minutes for streak modal
+    $longestStreakStmt = $conn->prepare("SELECT COALESCE(MAX(streak_count), 0) FROM habits WHERE user_id = :uid");
+    $longestStreakStmt->execute([':uid' => $userId]);
+    $longestStreak = max($streakDays, (int)$longestStreakStmt->fetchColumn());
+
+    $habitsCompletedStmt = $conn->prepare("SELECT COUNT(*) FROM habit_logs WHERE user_id = :uid");
+    $habitsCompletedStmt->execute([':uid' => $userId]);
+    $totalHabitsCompleted = (int)$habitsCompletedStmt->fetchColumn();
+
+    $totalFocusStmt = $conn->prepare("SELECT COALESCE(SUM(duration_minutes), 0) FROM focus_sessions WHERE user_id = :uid");
+    $totalFocusStmt->execute([':uid' => $userId]);
+    $totalFocusMinutes = (int)$totalFocusStmt->fetchColumn();
+
     echo json_encode([
         "status" => true,
         "data" => [
             "user_name" => $userName,
+            "user_avatar" => $userAvatar,
             "focus_minutes_today" => $focusMinutesToday,
             "focus_goal_minutes" => $goalMinutes,
             "pending_task_count" => $pendingTaskCount,
             "completed_task_count" => $completedTaskCount,
             "streak_days" => $streakDays,
+            "longest_streak" => $longestStreak,
+            "total_habits_completed" => $totalHabitsCompleted,
+            "total_focus_minutes" => $totalFocusMinutes,
             "priority_tasks" => $priorityTasks,
             "habits" => $habits
         ]
@@ -111,4 +129,3 @@ try {
     http_response_code(500);
     echo json_encode(["status" => false, "message" => "Database error: " . $e->getMessage()]);
 }
-
