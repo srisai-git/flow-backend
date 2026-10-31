@@ -25,6 +25,14 @@ try {
 
     if ($user && password_verify($password, $user['password'])) {
         $avatarVal = $user['avatar'] ?? '';
+        if (!empty($avatarVal) && strpos($avatarVal, 'avatar:') !== 0 && strpos($avatarVal, 'http') !== 0 && strpos($avatarVal, 'data:') !== 0) {
+            if (strpos($avatarVal, 'uploads/') === 0 || strpos($avatarVal, '/uploads/') === 0) {
+                $cleanPath = ltrim($avatarVal, '/');
+                $serverProtocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+                $serverHost = $_SERVER['HTTP_HOST'] ?? '127.0.0.1';
+                $avatarVal = $serverProtocol . $serverHost . '/flow_backend/' . $cleanPath;
+            }
+        }
         http_response_code(200);
         echo json_encode([
             "status"  => true,

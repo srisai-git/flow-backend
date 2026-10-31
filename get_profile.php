@@ -92,6 +92,17 @@ try {
     $createdAtTimestamp = strtotime($user['created_at'] ?? 'now');
     $memberSince = date("F Y", $createdAtTimestamp);
 
+    $rawAvatar = $user['avatar'] ?: "";
+    $resolvedAvatar = $rawAvatar;
+    if (!empty($rawAvatar) && strpos($rawAvatar, 'avatar:') !== 0 && strpos($rawAvatar, 'http') !== 0 && strpos($rawAvatar, 'data:') !== 0) {
+        if (strpos($rawAvatar, 'uploads/') === 0 || strpos($rawAvatar, '/uploads/') === 0) {
+            $cleanPath = ltrim($rawAvatar, '/');
+            $serverProtocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+            $serverHost = $_SERVER['HTTP_HOST'] ?? '127.0.0.1';
+            $resolvedAvatar = $serverProtocol . $serverHost . '/flow_backend/' . $cleanPath;
+        }
+    }
+
     http_response_code(200);
     echo json_encode([
         "status" => true,
@@ -100,8 +111,8 @@ try {
             "id" => (int)$user['id'],
             "name" => $user['name'] ?: "Sri Sai",
             "email" => $user['email'] ?: "sri.sai@example.com",
-            "avatar" => $user['avatar'] ?: "",
-            "avatar_url" => $user['avatar'] ?: "",
+            "avatar" => $resolvedAvatar,
+            "avatar_url" => $resolvedAvatar,
             "bio" => $user['bio'] ?: "",
             "member_since" => $memberSince,
             "total_focus_hours" => (float)$totalHours,

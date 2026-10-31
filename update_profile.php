@@ -28,6 +28,45 @@ $email = trim($_POST['email'] ?? $input['email'] ?? '');
 $bio = trim($_POST['bio'] ?? $input['bio'] ?? '');
 $avatar = trim($_POST['avatar'] ?? $input['avatar'] ?? $_POST['avatar_url'] ?? $input['avatar_url'] ?? '');
 
+// Process avatar upload or Base64 payload if present
+if (isset($_FILES['avatar']) && $_FILES['avatar']['error'] === UPLOAD_ERR_OK) {
+    $uploadDir = __DIR__ . '/uploads/avatars';
+    if (!is_dir($uploadDir)) {
+        @mkdir($uploadDir, 0777, true);
+    }
+    $tmpName = $_FILES['avatar']['tmp_name'];
+    $fileName = 'user_' . $userId . '_' . time() . '.jpg';
+    $targetPath = $uploadDir . '/' . $fileName;
+    if (move_uploaded_file($tmpName, $targetPath)) {
+        @copy($targetPath, $uploadDir . '/user_' . $userId . '.jpg');
+        $serverProtocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+        $serverHost = $_SERVER['HTTP_HOST'] ?? '127.0.0.1';
+        $avatar = $serverProtocol . $serverHost . '/flow_backend/uploads/avatars/' . $fileName;
+    }
+} elseif (!empty($avatar) && (strpos($avatar, 'data:image') === 0 || (strlen($avatar) > 200 && strpos($avatar, 'avatar:') !== 0 && strpos($avatar, '/') === false))) {
+    $uploadDir = __DIR__ . '/uploads/avatars';
+    if (!is_dir($uploadDir)) {
+        @mkdir($uploadDir, 0777, true);
+    }
+    $base64Data = $avatar;
+    $ext = 'jpg';
+    if (preg_match('/^data:image\/(\w+);base64,/', $avatar, $typeMatch)) {
+        $base64Data = substr($avatar, strpos($avatar, ',') + 1);
+        $ext = strtolower($typeMatch[1]);
+        if ($ext === 'jpeg') $ext = 'jpg';
+    }
+    $decoded = base64_decode($base64Data);
+    if ($decoded !== false && strlen($decoded) > 0) {
+        $fileName = 'user_' . $userId . '_' . time() . '.' . $ext;
+        $targetPath = $uploadDir . '/' . $fileName;
+        file_put_contents($targetPath, $decoded);
+        @file_put_contents($uploadDir . '/user_' . $userId . '.jpg', $decoded);
+        $serverProtocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+        $serverHost = $_SERVER['HTTP_HOST'] ?? '127.0.0.1';
+        $avatar = $serverProtocol . $serverHost . '/flow_backend/uploads/avatars/' . $fileName;
+    }
+}
+
 if ($userId <= 0) {
     http_response_code(400);
     echo json_encode(["status" => false, "message" => "Valid user_id is required."]);
