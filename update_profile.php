@@ -3,10 +3,15 @@
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/migrations.php';
 
-try {
-    runAllMigrations($conn);
-} catch (PDOException $e) {
-    error_log("Update Profile Migration Notice: " . $e->getMessage());
+// Fast migration check
+$migrationFlag = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow_migrated_v3';
+if (!file_exists($migrationFlag)) {
+    try {
+        runAllMigrations($conn);
+        @touch($migrationFlag);
+    } catch (PDOException $e) {
+        error_log("Update Profile Migration Notice: " . $e->getMessage());
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -29,54 +34,47 @@ if ($userId <= 0) {
     exit;
 }
 
-if (empty($name)) {
-    http_response_code(400);
-    echo json_encode(["status" => false, "message" => "Name cannot be empty."]);
-    exit;
-}
-
-if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-    http_response_code(400);
-    echo json_encode(["status" => false, "message" => "A valid email address is required."]);
-    exit;
-}
-
 try {
-    // Check if email already exists for another user
-    $emailStmt = $conn->prepare("SELECT id FROM users WHERE email = :email AND id != :id LIMIT 1");
-    $emailStmt->execute([':email' => $email, ':id' => $userId]);
-    if ($emailStmt->fetch()) {
-        http_response_code(409);
-        echo json_encode(["status" => false, "message" => "This email address is already in use by another account."]);
-        exit;
+    $fields = [];
+    $params = [':id' => $userId];
+
+    if (!empty($name)) {
+        $fields[] = "name = :name";
+        $params[':name'] = $name;
     }
 
-    // Build update query dynamically
-    $fields = ["name = :name", "email = :email"];
-    $params = [
-        ':name' => $name,
-        ':email' => $email,
-        ':id' => $userId
-    ];
+    if (!empty($email) && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        // Check if email already exists for another user
+        $emailStmt = $conn->prepare("SELECT id FROM users WHERE email = :email AND id != :id LIMIT 1");
+        $emailStmt->execute([':email' => $email, ':id' => $userId]);
+        if ($emailStmt->fetch()) {
+            http_response_code(409);
+            echo json_encode(["status" => false, "message" => "This email address is already in use by another account."]);
+            exit;
+        }
+        $fields[] = "email = :email";
+        $params[':email'] = $email;
+    }
 
-    if (!empty($bio)) {
+    if ($bio !== '') {
         $fields[] = "bio = :bio";
         $params[':bio'] = $bio;
     }
-    if (!empty($avatar)) {
+
+    if ($avatar !== '') {
         $fields[] = "avatar = :avatar";
         $params[':avatar'] = $avatar;
-        try {
-            $fields[] = "avatar_url = :avatar_url";
-            $params[':avatar_url'] = $avatar;
-        } catch (PDOException $e) {}
+        $fields[] = "avatar_url = :avatar_url";
+        $params[':avatar_url'] = $avatar;
     }
 
-    $sql = "UPDATE users SET " . implode(", ", $fields) . " WHERE id = :id";
-    $updateStmt = $conn->prepare($sql);
-    $updateStmt->execute($params);
+    if (!empty($fields)) {
+        $sql = "UPDATE users SET " . implode(", ", $fields) . " WHERE id = :id";
+        $updateStmt = $conn->prepare($sql);
+        $updateStmt->execute($params);
+    }
 
-    // If user_preferences parameters were sent (e.g. reminders_enabled or daily_focus_goal_minutes)
+    // Handle user_preferences parameters (reminders_enabled, daily_focus_goal_minutes, preferred_focus_duration)
     if (isset($input['reminders_enabled']) || isset($_POST['reminders_enabled'])) {
         $reminders = (int)($input['reminders_enabled'] ?? $_POST['reminders_enabled']);
         $prefStmt = $conn->prepare("
@@ -107,7 +105,7 @@ try {
         $prefStmt->execute([':uid' => $userId, ':block' => $blockMins]);
     }
 
-    // Fetch updated user to return
+    // Fetch updated user
     $fetchStmt = $conn->prepare("SELECT id, name, email, avatar, bio, created_at FROM users WHERE id = :id LIMIT 1");
     $fetchStmt->execute([':id' => $userId]);
     $updatedUser = $fetchStmt->fetch();
@@ -135,4 +133,3 @@ try {
         "message" => "Database error: " . $e->getMessage()
     ]);
 }
-?>

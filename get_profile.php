@@ -3,10 +3,14 @@
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/migrations.php';
 
-try {
-    runAllMigrations($conn);
-} catch (PDOException $e) {
-    error_log("Profile Migration Notice: " . $e->getMessage());
+$migrationFlag = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow_migrated_v3';
+if (!file_exists($migrationFlag)) {
+    try {
+        runAllMigrations($conn);
+        @touch($migrationFlag);
+    } catch (PDOException $e) {
+        error_log("Profile Migration Notice: " . $e->getMessage());
+    }
 }
 
 $input = getJsonInput();
@@ -98,10 +102,9 @@ try {
             "email" => $user['email'] ?: "sri.sai@example.com",
             "avatar" => $user['avatar'] ?: "",
             "avatar_url" => $user['avatar'] ?: "",
-            "bio" => $user['bio'] ?: "Deep work enthusiast & Computer Science researcher",
-            "created_at" => $user['created_at'] ?: date("Y-m-d H:i:s"),
-            "member_since" => "Member since " . $memberSince,
-            "total_focus_hours" => $totalHours,
+            "bio" => $user['bio'] ?: "",
+            "member_since" => $memberSince,
+            "total_focus_hours" => (float)$totalHours,
             "total_focus_minutes" => $totalMinutes,
             "completed_tasks_count" => $completedTasksCount,
             "current_streak" => $currentStreak,
@@ -118,4 +121,3 @@ try {
         "message" => "Database error: " . $e->getMessage()
     ]);
 }
-?>

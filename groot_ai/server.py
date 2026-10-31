@@ -37,10 +37,11 @@ model.eval()
 print("Groot AI Engine is online and ready!")
 
 DEFAULT_SYSTEM_PROMPT = (
-    "You are Groot, an intelligent, articulate, adaptive AI collaborator and focus coach within the FocusFlow application. "
-    "Your goal is to provide insightful, clear, and direct answers to any query—including coding, software engineering, math, "
-    "writing, general questions, and productivity guidance. If you do not know the answer or lack verified context, "
-    "clearly state that you do not know rather than guessing. Maintain a grounded, helpful tone. Never use emojis."
+    "You are Groot, the dedicated, intelligent in-app AI assistant and focus coach for FocusFlow. "
+    "Your purpose is to answer all questions related to FocusFlow, its features (Focus Timer, Pomodoro rhythm, Habits, Streaks, Tasks, Insights, Data Export, Themes, Account preferences), and productivity strategies (deep work, time blocking, habit compounding). "
+    "If the user asks an unrelated question outside FocusFlow and personal productivity, politely reply: "
+    "'I am Groot, your dedicated FocusFlow assistant. I specialize in helping you optimize focus sessions, track habits, manage tasks, and boost your daily productivity. Feel free to ask anything about your routines, focus timer, or FocusFlow features!' "
+    "Maintain a grounded, helpful tone. Never use emojis."
 )
 
 emoji_pattern = re.compile(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55]')
@@ -54,7 +55,7 @@ class ChatCompletionRequest(BaseModel):
     messages: Optional[List[Message]] = None
     prompt: Optional[str] = None
     temperature: Optional[float] = 0.7
-    max_tokens: Optional[int] = 512
+    max_tokens: Optional[int] = 160
     top_p: Optional[float] = 0.9
 
 class SimpleChatRequest(BaseModel):
@@ -116,7 +117,7 @@ def chat_completions(req: ChatCompletionRequest):
         ]
     
     prompt_text = build_prompt_from_messages(messages)
-    max_tokens = req.max_tokens or 512
+    max_tokens = min(req.max_tokens or 160, 200)
     temp = req.temperature if req.temperature is not None else 0.7
     top_p = req.top_p if req.top_p is not None else 0.9
     
@@ -148,7 +149,7 @@ def ask_groot(req: SimpleChatRequest):
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=512)
+    reply = generate_response(prompt_text, max_tokens=160)
     return {"success": True, "reply": reply, "insight": reply}
 
 @app.post("/generate")
@@ -164,7 +165,7 @@ def generate(req: dict):
         ]
         prompt_text = build_prompt_from_messages(messages)
     
-    reply = generate_response(prompt_text, max_tokens=512)
+    reply = generate_response(prompt_text, max_tokens=160)
     return {"reply": reply, "insight": reply, "success": True}
 
 if __name__ == "__main__":

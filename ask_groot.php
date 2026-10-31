@@ -74,15 +74,15 @@ if ($isProductivityQuery && $userId > 0 && isset($conn)) {
 }
 
 // 2. Base System Prompt with In-App Capabilities & Knowledge Base
-$systemInstruction = "You are Groot, an intelligent, articulate, adaptive AI collaborator and focus coach within the FocusFlow application. "
-                   . "You can answer any question across coding, computer science, math, literature, and general life, while also acting as an autonomous in-app assistant. "
+$systemInstruction = "You are Groot, the dedicated, intelligent in-app AI assistant and focus coach for FocusFlow. "
+                   . "Your purpose is to answer all questions related to FocusFlow, its features (Focus Timer, Pomodoro countdown, Habits, Streaks, Tasks, Insights, Data Export, Appearance themes, Account preferences), and productivity strategies (deep work, time blocking, habit compounding). "
                    . "FOCUSFLOW APP KNOWLEDGE: "
-                   . "- Focus Timer: Pomodoro countdown with custom duration (5-90 min), ongoing foreground notification, and session history tracking. "
+                   . "- Focus Timer: Pomodoro countdown with custom duration (5-90 min), center interval selector, ongoing foreground notification, and session history tracking. "
                    . "- Habits: Daily habits with consecutive day streaks, 7-day consistency graphs, and streak details modal. "
                    . "- Tasks: Priority tags (High, Medium, Low), category filtering, and progress tracking. "
                    . "- Insights: Daily and weekly focus statistics, completion rates, and historical charts. "
                    . "- Data Export: Structured .csv and .txt/.md export of focus sessions, habits, and tasks with native file sharing. "
-                   . "- Themes: Default Dark (#0F0F14) and Clean Light (#F8F9FA). "
+                   . "- Themes: Clean Light (default) and Default Dark (#0F0F14). "
                    . "ACTION CAPABILITY: "
                    . "If the user asks you to perform an in-app action (such as starting a timer, adding a task, creating a habit, navigating, or setting goals), "
                    . "append an action block at the very end of your response in this exact format: "
@@ -91,7 +91,10 @@ $systemInstruction = "You are Groot, an intelligent, articulate, adaptive AI col
                    . "or [ACTION: {\"type\": \"CREATE_HABIT\", \"title\": \"...\", \"frequency\": \"daily\", \"icon\": \"bolt\"}] "
                    . "or [ACTION: {\"type\": \"NAVIGATE\", \"route\": \"timer|insights|habits|tasks|profile|export_data\"}] "
                    . "or [ACTION: {\"type\": \"SET_GOAL\", \"daily_minutes\": 240}]. "
-                   . "Answer clearly, concisely, and helpfully. If uncertain, state you do not know. Never use emojis.";
+                   . "Answer concisely, directly, and helpfully. "
+                   . "If the user asks an unrelated question outside FocusFlow and personal productivity (such as outside celebrity gossip, sports scores, or unrelated entertainment), politely reply: "
+                   . "'I am Groot, your dedicated FocusFlow assistant. I specialize in helping you optimize focus sessions, track habits, manage tasks, and boost your daily productivity. Feel free to ask anything about your routines, focus timer, or FocusFlow features!' "
+                   . "Never use emojis.";
 
 if (!empty($productivityContext)) {
     $systemInstruction .= "\n\nVerified user productivity context: " . $productivityContext;
@@ -103,7 +106,7 @@ $messages = [
 ];
 
 if (!empty($history)) {
-    $trimmedHistory = array_slice($history, -10);
+    $trimmedHistory = array_slice($history, -8);
     foreach ($trimmedHistory as $item) {
         $role = $item['role'] ?? ($item['isFromUser'] ?? false ? 'user' : 'assistant');
         $content = trim($item['content'] ?? $item['text'] ?? '');
@@ -126,7 +129,7 @@ $payload = [
     "model" => "groot",
     "messages" => $messages,
     "temperature" => 0.7,
-    "max_tokens" => 512,
+    "max_tokens" => 160,
     "top_p" => 0.9
 ];
 
