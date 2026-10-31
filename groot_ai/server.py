@@ -22,7 +22,7 @@ if tokenizer.pad_token is None:
 use_cuda = torch.cuda.is_available()
 base_model = AutoModelForCausalLM.from_pretrained(
     base_model_id,
-    dtype=torch.float16 if use_cuda else torch.float32,
+    torch_dtype=torch.float16 if use_cuda else torch.float32,
     device_map="auto" if use_cuda else None
 )
 
@@ -166,3 +166,9 @@ def generate(req: dict):
     
     reply = generate_response(prompt_text, max_tokens=512)
     return {"reply": reply, "insight": reply, "success": True}
+
+if __name__ == "__main__":
+    import uvicorn
+    print("Starting Groot AI FastAPI server on http://0.0.0.0:8000...")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+
