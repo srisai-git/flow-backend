@@ -74,8 +74,10 @@ if ($isProductivityQuery && $userId > 0 && isset($conn)) {
 }
 
 // 2. Base System Prompt with In-App Capabilities & Knowledge Base
-$systemInstruction = "You are Groot, the dedicated, intelligent in-app AI assistant and focus coach for FocusFlow. "
-                   . "Your purpose is to answer all questions related to FocusFlow, its features (Focus Timer, Pomodoro countdown, Habits, Streaks, Tasks, Insights, Data Export, Appearance themes, Account preferences), and productivity strategies (deep work, time blocking, habit compounding). "
+$systemInstruction = "You are Groot, an intelligent, authentic AI collaborator and focus coach inside FocusFlow. "
+                   . "Answer general conversational greetings and casual remarks (e.g., 'good night', 'how are you', 'thank you', 'hello') naturally, warmly, and briefly like a real companion. "
+                   . "Do not force productivity advice into casual greetings. "
+                   . "You can answer questions on coding, academic topics, tasks, and focus. "
                    . "FOCUSFLOW APP KNOWLEDGE: "
                    . "- Focus Timer: Pomodoro countdown with custom duration (5-90 min), center interval selector, ongoing foreground notification, and session history tracking. "
                    . "- Habits: Daily habits with consecutive day streaks, 7-day consistency graphs, and streak details modal. "
@@ -92,8 +94,6 @@ $systemInstruction = "You are Groot, the dedicated, intelligent in-app AI assist
                    . "or [ACTION: {\"type\": \"NAVIGATE\", \"route\": \"timer|insights|habits|tasks|profile|export_data\"}] "
                    . "or [ACTION: {\"type\": \"SET_GOAL\", \"daily_minutes\": 240}]. "
                    . "Answer concisely, directly, and helpfully. "
-                   . "If the user asks an unrelated question outside FocusFlow and personal productivity (such as outside celebrity gossip, sports scores, or unrelated entertainment), politely reply: "
-                   . "'I am Groot, your dedicated FocusFlow assistant. I specialize in helping you optimize focus sessions, track habits, manage tasks, and boost your daily productivity. Feel free to ask anything about your routines, focus timer, or FocusFlow features!' "
                    . "Never use emojis.";
 
 if (!empty($productivityContext)) {
@@ -290,14 +290,20 @@ if ($detectedAction === null) {
     }
 }
 
-// 7. General Knowledge / App Q&A Fallback if AI server is offline
+// 7. Conversational & Knowledge Fallback if AI server is offline
 if (empty($aiResponseText)) {
-    if (preg_match('/^(hi|hello|hey|greetings|good\s*(morning|afternoon|evening|day))[\s!.]*$/i', $lowerPrompt)) {
-        $aiResponseText = "Hello! I am Groot, your AI assistant and productivity collaborator in FocusFlow. How can I assist you with your focus, tasks, or inquiries today?";
+    if (preg_match('/^(good\s*night|sweet\s*dreams|night\s*night)[\s!.]*$/i', $lowerPrompt)) {
+        $aiResponseText = "Good night. Rest well and recharge for tomorrow.";
+    } elseif (preg_match('/^(how\s*are\s*you|how\'s\s*it\s*going|how\s*are\s*things)[\s!.]*$/i', $lowerPrompt)) {
+        $aiResponseText = "I am doing well, thank you. Ready to help you whenever you need.";
+    } elseif (preg_match('/^(thank\s*you|thanks|thx|much\s*appreciated)[\s!.]*$/i', $lowerPrompt)) {
+        $aiResponseText = "You are welcome. Happy to help anytime.";
+    } elseif (preg_match('/^(hi|hello|hey|greetings|good\s*(morning|afternoon|evening|day))[\s!.]*$/i', $lowerPrompt)) {
+        $aiResponseText = "Hello! I am Groot. How are you doing today?";
     } elseif (preg_match('/(who are you|what are you|introduce yourself)/i', $lowerPrompt)) {
-        $aiResponseText = "I am Groot, your versatile in-app AI collaborator. I can answer questions across coding, math, and general topics, as well as take action directly inside FocusFlow—such as starting timers, scheduling tasks, building habits, and analyzing your focus stats.";
+        $aiResponseText = "I am Groot, your AI collaborator and focus coach inside FocusFlow. I can help answer questions on coding, academic topics, tasks, and focus, or take action directly in the app.";
     } elseif (preg_match('/(what can you do|features|help me with)/i', $lowerPrompt)) {
-        $aiResponseText = "I can do both conversational reasoning and autonomous in-app actions:\n- Start focus timers (e.g. 'Start a 25 min timer')\n- Add priority tasks (e.g. 'Add task Finish project draft')\n- Create daily habits (e.g. 'Create habit Read 20 pages')\n- Navigate screens (e.g. 'Open insights', 'Export data')\n- Explain software, algorithms, academic concepts, or analyze your streak consistency.";
+        $aiResponseText = "I can help with conversational queries or take in-app actions:\n- Start focus timers (e.g. 'Start a 25 min timer')\n- Add priority tasks (e.g. 'Add task Finish project draft')\n- Create daily habits (e.g. 'Create habit Read 20 pages')\n- Navigate screens (e.g. 'Open insights', 'Export data')\n- Answer questions across coding, math, and deep work strategies.";
     } elseif (preg_match('/(streak|compounding|consistency)/i', $lowerPrompt)) {
         $aiResponseText = "In FocusFlow, streaks represent consecutive days where you complete your active habits. Maintaining a streak compounds daily discipline into permanent habit momentum. Check your Habit Tracker or tap the streak badge on the top bar for streak details!";
     } elseif (preg_match('/(export|backup|csv)/i', $lowerPrompt)) {
@@ -305,7 +311,7 @@ if (empty($aiResponseText)) {
     } elseif ($isProductivityQuery && !empty($productivityContext)) {
         $aiResponseText = "Here is your verified FocusFlow activity: " . $productivityContext . " Starting a 25-minute Pomodoro session will keep your momentum strong.";
     } else {
-        $aiResponseText = "I am Groot, your FocusFlow assistant. I am ready to answer your questions and perform actions like starting timers, scheduling tasks, and creating habits. My local reasoning server (port 8000) is currently offline, but all in-app actions and assistance are fully operational!";
+        $aiResponseText = "I am Groot, your AI collaborator. Feel free to ask anything about coding, focus, your tasks, or habits.";
     }
 }
 
