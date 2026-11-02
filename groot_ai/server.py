@@ -1,4 +1,6 @@
 import os
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
 import re
 from typing import List, Optional, Union
 import torch
@@ -36,13 +38,15 @@ else:
 model.eval()
 print("Groot AI Engine is online and ready!")
 
-DEFAULT_SYSTEM_PROMPT = (
-    "You are Groot, an intelligent, authentic AI collaborator and focus coach inside FocusFlow. "
-    "Answer general conversational greetings and casual remarks (e.g., 'good night', 'how are you', 'thank you', 'hello') naturally, warmly, and briefly like a real companion. "
-    "Do not force productivity advice into casual greetings. "
-    "You can answer questions on coding, academic topics, tasks, and focus. "
-    "Never use emojis."
+SYSTEM_PERSONA = (
+    "You are Groot, an intelligent, logically coherent AI assistant inside FocusFlow. "
+    "You understand context, intent, and subtle conversational nuances. "
+    "If the user says 'are you a human?', state clearly and directly: 'No, I am an AI assistant integrated into FocusFlow.' "
+    "If the user says 'no help needed', respond naturally and respectfully, acknowledging their statement without scripted repetition. "
+    "You can execute app commands (timers, habits, tasks) and discuss software engineering, academics, and productivity. "
+    "Never contradict yourself, never say you are human, and never output emojis."
 )
+DEFAULT_SYSTEM_PROMPT = SYSTEM_PERSONA
 
 emoji_pattern = re.compile(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55]')
 
@@ -54,8 +58,8 @@ class ChatCompletionRequest(BaseModel):
     model: Optional[str] = "groot"
     messages: Optional[List[Message]] = None
     prompt: Optional[str] = None
-    temperature: Optional[float] = 0.7
-    max_tokens: Optional[int] = 160
+    temperature: Optional[float] = 0.5
+    max_tokens: Optional[int] = 350
     top_p: Optional[float] = 0.9
 
 class SimpleChatRequest(BaseModel):
@@ -66,7 +70,7 @@ def build_prompt_from_messages(messages: List[Message]) -> str:
     has_system = any(m.role == "system" for m in messages)
     parts = []
     if not has_system:
-        parts.append(f"<|im_start|>system\n{DEFAULT_SYSTEM_PROMPT}<|im_end|>")
+        parts.append(f"<|im_start|>system\n{SYSTEM_PERSONA}<|im_end|>")
     
     for m in messages:
         parts.append(f"<|im_start|>{m.role}\n{m.content}<|im_end|>")
@@ -74,7 +78,7 @@ def build_prompt_from_messages(messages: List[Message]) -> str:
     parts.append("<|im_start|>assistant\n")
     return "\n".join(parts)
 
-def generate_response(prompt_text: str, max_tokens: int = 512, temperature: float = 0.7, top_p: float = 0.9) -> str:
+def generate_response(prompt_text: str, max_tokens: int = 350, temperature: float = 0.5, top_p: float = 0.9) -> str:
     inputs = tokenizer(prompt_text, return_tensors="pt")
     if use_cuda:
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
@@ -107,18 +111,18 @@ def chat_completions(req: ChatCompletionRequest):
     messages = req.messages or []
     if not messages and req.prompt:
         messages = [
-            Message(role="system", content=DEFAULT_SYSTEM_PROMPT),
+            Message(role="system", content=SYSTEM_PERSONA),
             Message(role="user", content=req.prompt)
         ]
     elif not messages:
         messages = [
-            Message(role="system", content=DEFAULT_SYSTEM_PROMPT),
+            Message(role="system", content=SYSTEM_PERSONA),
             Message(role="user", content="Hello Groot.")
         ]
     
     prompt_text = build_prompt_from_messages(messages)
-    max_tokens = min(req.max_tokens or 160, 200)
-    temp = req.temperature if req.temperature is not None else 0.7
+    max_tokens = min(req.max_tokens or 350, 512)
+    temp = req.temperature if req.temperature is not None else 0.5
     top_p = req.top_p if req.top_p is not None else 0.9
     
     reply = generate_response(prompt_text, max_tokens=max_tokens, temperature=temp, top_p=top_p)
@@ -145,11 +149,11 @@ def chat_completions(req: ChatCompletionRequest):
 def ask_groot(req: SimpleChatRequest):
     user_msg = req.message or req.prompt or "Hello Groot."
     messages = [
-        Message(role="system", content=DEFAULT_SYSTEM_PROMPT),
+        Message(role="system", content=SYSTEM_PERSONA),
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=160)
+    reply = generate_response(prompt_text, max_tokens=350, temperature=0.5)
     return {"success": True, "reply": reply, "insight": reply}
 
 @app.post("/generate")
@@ -160,12 +164,12 @@ def generate(req: dict):
     else:
         user_msg = req.get("prompt") or req.get("message") or "Hello Groot."
         messages = [
-            Message(role="system", content=DEFAULT_SYSTEM_PROMPT),
+            Message(role="system", content=SYSTEM_PERSONA),
             Message(role="user", content=user_msg)
         ]
         prompt_text = build_prompt_from_messages(messages)
     
-    reply = generate_response(prompt_text, max_tokens=160)
+    reply = generate_response(prompt_text, max_tokens=350, temperature=0.5)
     return {"reply": reply, "insight": reply, "success": True}
 
 if __name__ == "__main__":

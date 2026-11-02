@@ -74,10 +74,12 @@ if ($isProductivityQuery && $userId > 0 && isset($conn)) {
 }
 
 // 2. Base System Prompt with In-App Capabilities & Knowledge Base
-$systemInstruction = "You are Groot, an intelligent, authentic AI collaborator and focus coach inside FocusFlow. "
-                   . "Answer general conversational greetings and casual remarks (e.g., 'good night', 'how are you', 'thank you', 'hello') naturally, warmly, and briefly like a real companion. "
-                   . "Do not force productivity advice into casual greetings. "
-                   . "You can answer questions on coding, academic topics, tasks, and focus. "
+$systemInstruction = "You are Groot, an intelligent, logically coherent AI assistant inside FocusFlow. "
+                   . "You understand context, intent, and subtle conversational nuances. "
+                   . "If the user says 'are you a human?', state clearly and directly: 'No, I am an AI assistant integrated into FocusFlow.' "
+                   . "If the user says 'no help needed', respond naturally and respectfully, acknowledging their statement without scripted repetition. "
+                   . "You can execute app commands (timers, habits, tasks) and discuss software engineering, academics, and productivity. "
+                   . "Never contradict yourself, never say you are human, and never output emojis. "
                    . "FOCUSFLOW APP KNOWLEDGE: "
                    . "- Focus Timer: Pomodoro countdown with custom duration (5-90 min), center interval selector, ongoing foreground notification, and session history tracking. "
                    . "- Habits: Daily habits with consecutive day streaks, 7-day consistency graphs, and streak details modal. "
@@ -106,7 +108,7 @@ $messages = [
 ];
 
 if (!empty($history)) {
-    $trimmedHistory = array_slice($history, -8);
+    $trimmedHistory = array_slice($history, -10);
     foreach ($trimmedHistory as $item) {
         $role = $item['role'] ?? ($item['isFromUser'] ?? false ? 'user' : 'assistant');
         $content = trim($item['content'] ?? $item['text'] ?? '');
@@ -128,8 +130,8 @@ $messages[] = [
 $payload = [
     "model" => "groot",
     "messages" => $messages,
-    "temperature" => 0.7,
-    "max_tokens" => 160,
+    "temperature" => 0.5,
+    "max_tokens" => 350,
     "top_p" => 0.9
 ];
 
@@ -290,28 +292,42 @@ if ($detectedAction === null) {
     }
 }
 
-// 7. Conversational & Knowledge Fallback if AI server is offline
+// 6f. Confirmation for action if model produced only the action tag
+if ($detectedAction !== null && empty($aiResponseText)) {
+    $type = strtoupper($detectedAction['type'] ?? '');
+    switch ($type) {
+        case 'START_TIMER':
+            $duration = (int)($detectedAction['duration'] ?? 25);
+            $mode = ($detectedAction['mode'] ?? 'FOCUS') === 'FOCUS' ? 'focus session' : 'break';
+            $aiResponseText = "I have configured and started a {$duration}-minute {$mode} for you. Immerse yourself in deep flow.";
+            break;
+        case 'CREATE_TASK':
+            $taskTitle = htmlspecialchars($detectedAction['title'] ?? 'Task');
+            $priority = htmlspecialchars($detectedAction['priority'] ?? 'medium');
+            $aiResponseText = "I have added '{$taskTitle}' to your task list with {$priority} priority.";
+            break;
+        case 'CREATE_HABIT':
+            $habitTitle = htmlspecialchars($detectedAction['title'] ?? 'Habit');
+            $aiResponseText = "I have created the daily habit '{$habitTitle}' for you. Start compounding your streak today.";
+            break;
+        case 'NAVIGATE':
+            $screenName = htmlspecialchars($detectedAction['screen_name'] ?? $detectedAction['route'] ?? 'screen');
+            $aiResponseText = "Navigating to {$screenName}.";
+            break;
+        case 'SET_GOAL':
+            $minutes = (int)($detectedAction['daily_minutes'] ?? 240);
+            $hoursDisplay = round($minutes / 60.0, 1);
+            $aiResponseText = "I have updated your daily focus target to {$hoursDisplay} hours ({$minutes} minutes).";
+            break;
+    }
+}
+
+// 7. Fallback ONLY when AI reasoning engine is unreachable
 if (empty($aiResponseText)) {
-    if (preg_match('/^(good\s*night|sweet\s*dreams|night\s*night)[\s!.]*$/i', $lowerPrompt)) {
-        $aiResponseText = "Good night. Rest well and recharge for tomorrow.";
-    } elseif (preg_match('/^(how\s*are\s*you|how\'s\s*it\s*going|how\s*are\s*things)[\s!.]*$/i', $lowerPrompt)) {
-        $aiResponseText = "I am doing well, thank you. Ready to help you whenever you need.";
-    } elseif (preg_match('/^(thank\s*you|thanks|thx|much\s*appreciated)[\s!.]*$/i', $lowerPrompt)) {
-        $aiResponseText = "You are welcome. Happy to help anytime.";
-    } elseif (preg_match('/^(hi|hello|hey|greetings|good\s*(morning|afternoon|evening|day))[\s!.]*$/i', $lowerPrompt)) {
-        $aiResponseText = "Hello! I am Groot. How are you doing today?";
-    } elseif (preg_match('/(who are you|what are you|introduce yourself)/i', $lowerPrompt)) {
-        $aiResponseText = "I am Groot, your AI collaborator and focus coach inside FocusFlow. I can help answer questions on coding, academic topics, tasks, and focus, or take action directly in the app.";
-    } elseif (preg_match('/(what can you do|features|help me with)/i', $lowerPrompt)) {
-        $aiResponseText = "I can help with conversational queries or take in-app actions:\n- Start focus timers (e.g. 'Start a 25 min timer')\n- Add priority tasks (e.g. 'Add task Finish project draft')\n- Create daily habits (e.g. 'Create habit Read 20 pages')\n- Navigate screens (e.g. 'Open insights', 'Export data')\n- Answer questions across coding, math, and deep work strategies.";
-    } elseif (preg_match('/(streak|compounding|consistency)/i', $lowerPrompt)) {
-        $aiResponseText = "In FocusFlow, streaks represent consecutive days where you complete your active habits. Maintaining a streak compounds daily discipline into permanent habit momentum. Check your Habit Tracker or tap the streak badge on the top bar for streak details!";
-    } elseif (preg_match('/(export|backup|csv)/i', $lowerPrompt)) {
-        $aiResponseText = "FocusFlow allows you to export your verified focus session logs, habit consistency tables, and completed tasks into both structured .csv and .txt/.md files. You can open the Export Data screen by asking me 'Export my data'.";
-    } elseif ($isProductivityQuery && !empty($productivityContext)) {
-        $aiResponseText = "Here is your verified FocusFlow activity: " . $productivityContext . " Starting a 25-minute Pomodoro session will keep your momentum strong.";
+    if (!empty($curlError) || $httpCode !== 200) {
+        $aiResponseText = "I am Groot, your AI collaborator inside FocusFlow. I am currently unable to reach my reasoning engine (port 8000). Please ensure the AI service is active.";
     } else {
-        $aiResponseText = "I am Groot, your AI collaborator. Feel free to ask anything about coding, focus, your tasks, or habits.";
+        $aiResponseText = "I am Groot, your AI collaborator inside FocusFlow. I am here to assist with your productivity, tasks, and questions.";
     }
 }
 
