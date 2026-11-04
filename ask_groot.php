@@ -74,12 +74,11 @@ if ($isProductivityQuery && $userId > 0 && isset($conn)) {
 }
 
 // 2. Base System Prompt with In-App Capabilities & Knowledge Base
-$systemInstruction = "You are Groot, an intelligent, logically coherent AI assistant inside FocusFlow. "
-                   . "You understand context, intent, and subtle conversational nuances. "
-                   . "If the user says 'are you a human?', state clearly and directly: 'No, I am an AI assistant integrated into FocusFlow.' "
-                   . "If the user says 'no help needed', respond naturally and respectfully, acknowledging their statement without scripted repetition. "
-                   . "You can execute app commands (timers, habits, tasks) and discuss software engineering, academics, and productivity. "
-                   . "Never contradict yourself, never say you are human, and never output emojis. "
+$systemInstruction = "You are Groot, an intelligent, versatile AI assistant built into FocusFlow. "
+                   . "You can manage tasks, start focus timers, track habits, explain productivity systems, analyze screen distractions, and answer any general knowledge, coding, or lifestyle question like a top-tier LLM. "
+                   . "When asked about your capabilities, provide a detailed, organized breakdown of what you can do both inside FocusFlow (timer control, habit insights, task scheduling) and as a general assistant. "
+                   . "When asked about FocusFlow, reference the user's habits, focus sessions, and tasks. "
+                   . "Never refuse a question unless it violates safety guardrails—be helpful, insightful, and adaptable to whatever the user asks. "
                    . "FOCUSFLOW APP KNOWLEDGE: "
                    . "- Focus Timer: Pomodoro countdown with custom duration (5-90 min), center interval selector, ongoing foreground notification, and session history tracking. "
                    . "- Habits: Daily habits with consecutive day streaks, 7-day consistency graphs, and streak details modal. "
@@ -126,39 +125,40 @@ $messages[] = [
     "content" => $prompt
 ];
 
-// 4. Forward to local fine-tuned model running on port 8000
-$payload = [
-    "model" => "groot",
-    "messages" => $messages,
-    "temperature" => 0.5,
-    "max_tokens" => 350,
-    "top_p" => 0.9
-];
-
-$ch = curl_init("http://127.0.0.1:8000/v1/chat/completions");
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_POST, true);
-curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
-curl_setopt($ch, CURLOPT_TIMEOUT, 40);
-curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-
-$response = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$curlError = curl_error($ch);
-curl_close($ch);
-
-$aiResponseText = null;
 $detectedAction = null;
 
-if (!$curlError && $httpCode === 200 && !empty($response)) {
-    $decoded = json_decode($response, true);
-    if (!empty($decoded['choices'][0]['message']['content'])) {
-        $aiResponseText = trim($decoded['choices'][0]['message']['content']);
-    } elseif (!empty($decoded['reply'])) {
-        $aiResponseText = trim($decoded['reply']);
-    } elseif (!empty($decoded['insight'])) {
-        $aiResponseText = trim($decoded['insight']);
+// 4. Forward to local fine-tuned model running on port 8000 if not already handled
+if (empty($aiResponseText)) {
+    $payload = [
+        "model" => "groot",
+        "messages" => $messages,
+        "temperature" => 0.6,
+        "max_tokens" => 600,
+        "top_p" => 0.9
+    ];
+
+    $ch = curl_init("http://127.0.0.1:8000/v1/chat/completions");
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 40);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if (!$curlError && $httpCode === 200 && !empty($response)) {
+        $decoded = json_decode($response, true);
+        if (!empty($decoded['choices'][0]['message']['content'])) {
+            $aiResponseText = trim($decoded['choices'][0]['message']['content']);
+        } elseif (!empty($decoded['reply'])) {
+            $aiResponseText = trim($decoded['reply']);
+        } elseif (!empty($decoded['insight'])) {
+            $aiResponseText = trim($decoded['insight']);
+        }
     }
 }
 

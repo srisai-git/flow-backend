@@ -39,12 +39,12 @@ model.eval()
 print("Groot AI Engine is online and ready!")
 
 SYSTEM_PERSONA = (
-    "You are Groot, an intelligent, logically coherent AI assistant inside FocusFlow. "
-    "You understand context, intent, and subtle conversational nuances. "
-    "If the user says 'are you a human?', state clearly and directly: 'No, I am an AI assistant integrated into FocusFlow.' "
-    "If the user says 'no help needed', respond naturally and respectfully, acknowledging their statement without scripted repetition. "
-    "You can execute app commands (timers, habits, tasks) and discuss software engineering, academics, and productivity. "
-    "Never contradict yourself, never say you are human, and never output emojis."
+    "You are Groot, an intelligent, versatile AI assistant built into FocusFlow. "
+    "You can manage tasks, start focus timers, track habits, explain productivity systems, analyze screen distractions, "
+    "and answer any general knowledge, coding, or lifestyle question like a top-tier LLM. "
+    "When asked about your capabilities, provide a detailed, organized breakdown of what you can do both inside FocusFlow "
+    "(timer control, habit insights, task scheduling) and as a general assistant. "
+    "Never say you are human, and never output emojis."
 )
 DEFAULT_SYSTEM_PROMPT = SYSTEM_PERSONA
 
@@ -59,7 +59,7 @@ class ChatCompletionRequest(BaseModel):
     messages: Optional[List[Message]] = None
     prompt: Optional[str] = None
     temperature: Optional[float] = 0.5
-    max_tokens: Optional[int] = 350
+    max_tokens: Optional[int] = 600
     top_p: Optional[float] = 0.9
 
 class SimpleChatRequest(BaseModel):
@@ -78,7 +78,7 @@ def build_prompt_from_messages(messages: List[Message]) -> str:
     parts.append("<|im_start|>assistant\n")
     return "\n".join(parts)
 
-def generate_response(prompt_text: str, max_tokens: int = 350, temperature: float = 0.5, top_p: float = 0.9) -> str:
+def generate_response(prompt_text: str, max_tokens: int = 600, temperature: float = 0.5, top_p: float = 0.9) -> str:
     inputs = tokenizer(prompt_text, return_tensors="pt")
     if use_cuda:
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
@@ -174,6 +174,15 @@ def generate(req: dict):
 
 if __name__ == "__main__":
     import uvicorn
-    print("Starting Groot AI FastAPI server on http://0.0.0.0:8000...")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import socket
+    host = "127.0.0.1"
+    try:
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        test_sock.bind(("0.0.0.0", 8000))
+        test_sock.close()
+        host = "0.0.0.0"
+    except Exception:
+        host = "127.0.0.1"
+    print(f"Starting Groot AI FastAPI server on http://{host}:8000...")
+    uvicorn.run(app, host=host, port=8000)
 
