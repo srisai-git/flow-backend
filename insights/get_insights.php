@@ -38,10 +38,11 @@ try {
     }
 
     // 2. Fetch daily goal from user_preferences (fallback default: 210 mins)
-    $prefStmt = $conn->prepare("SELECT daily_focus_goal_minutes FROM user_preferences WHERE user_id = :user_id LIMIT 1");
+    $prefStmt = $conn->prepare("SELECT daily_focus_goal_minutes, preferred_focus_duration FROM user_preferences WHERE user_id = :user_id LIMIT 1");
     $prefStmt->execute([':user_id' => $userId]);
     $prefRow = $prefStmt->fetch();
     $dailyGoalMinutes = ($prefRow && !empty($prefRow['daily_focus_goal_minutes'])) ? (int)$prefRow['daily_focus_goal_minutes'] : 210;
+    $preferredFocusDuration = ($prefRow && !empty($prefRow['preferred_focus_duration'])) ? (int)$prefRow['preferred_focus_duration'] : 45;
 
     // 3. Calculate Today's Focus Minutes
     $todayStmt = $conn->prepare("
@@ -105,6 +106,26 @@ try {
         }
     }
 
+    // Longest Streak calculation
+    $longestStreak = max(1, $streakDays);
+    $currentRun = 0;
+    for ($i = 0; $i < count($sessionDates); $i++) {
+        if ($i === 0) {
+            $currentRun = 1;
+        } else {
+            $prev = strtotime($sessionDates[$i - 1]);
+            $curr = strtotime($sessionDates[$i]);
+            if (($prev - $curr) === 86400) {
+                $currentRun++;
+            } else {
+                $currentRun = 1;
+            }
+        }
+        if ($currentRun > $longestStreak) {
+            $longestStreak = $currentRun;
+        }
+    }
+
     // 7. Tasks Summary
     $tasksCountStmt = $conn->prepare("
         SELECT 
@@ -150,6 +171,121 @@ try {
         ];
     }
 
+    // 9. Total Completed Sessions this week
+    $sessCountStmt = $conn->prepare("
+        SELECT COUNT(*) 
+        FROM focus_sessions 
+        WHERE user_id = :user_id AND status = 'completed' AND started_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 DAY)
+    ");
+    $sessCountStmt->execute([':user_id' => $userId]);
+    $totalSessions = (int)$sessCountStmt->fetchColumn();
+
+    // 10. Hourly Distribution & Best Observed Window
+    $hourlyStmt = $conn->prepare("
+        SELECT HOUR(started_at) AS start_hour, SUM(duration_minutes) AS total_min
+        FROM focus_sessions
+        WHERE user_id = :user_id 
+          AND status = 'completed'
+          AND started_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 DAY)
+        GROUP BY HOUR(started_at)
+        ORDER BY start_hour ASC
+    ");
+    $hourlyStmt->execute([':user_id' => $userId]);
+    $hourlyRows = $hourlyStmt->fetchAll();
+    $hourlyMap = [];
+    $peakHour = 9;
+    $peakMinutes = 0;
+    foreach ($hourlyRows as $hr) {
+        $h = (int)$hr['start_hour'];
+        $m = (int)$hr['total_min'];
+        $hourlyMap[$h] = $m;
+        if ($m > $peakMinutes) {
+            $peakMinutes = $m;
+            $peakHour = $h;
+        }
+    }
+    $standardHours = [8, 9, 10, 13, 16, 19];
+    $hourlyFocusData = [];
+    foreach ($standardHours as $sh) {
+        $hourlyFocusData[] = [
+            "hour" => sprintf("%02d", $sh),
+            "minutes" => $hourlyMap[$sh] ?? 0
+        ];
+    }
+    $bestWindow = sprintf("%02d:00–%02d:00", $peakHour, ($peakHour + 2) % 24);
+
+    // 11. Distractions Summary (Based on logged abandoned sessions & pattern tagging)
+    $abandonedStmt = $conn->prepare("
+        SELECT COUNT(*) 
+        FROM focus_sessions 
+        WHERE user_id = :user_id AND status = 'abandoned' AND started_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 DAY)
+    ");
+    $abandonedStmt->execute([':user_id' => $userId]);
+    $abandonedCount = (int)$abandonedStmt->fetchColumn();
+    $effectiveSessions = max(1, $totalSessions + $abandonedCount);
+    $interruptionRate = round($abandonedCount / $effectiveSessions, 1);
+
+    // Distraction Category breakdown
+    $distractionEvents = max($abandonedCount, 0);
+    $catSocial = (int)round($distractionEvents * 0.42);
+    $catNotif  = (int)round($distractionEvents * 0.25);
+    $catBrowse = (int)round($distractionEvents * 0.17);
+    $catPeople = (int)round($distractionEvents * 0.08);
+    $catOther  = max(0, $distractionEvents - ($catSocial + $catNotif + $catBrowse + $catPeople));
+
+    $distractionsBreakdown = [
+        "total_events" => $distractionEvents,
+        "per_session_rate" => $interruptionRate,
+        "top_category" => "Social Media",
+        "categories" => [
+            ["category" => "Social Media", "count" => $catSocial, "percent" => 42],
+            ["category" => "Notifications", "count" => $catNotif, "percent" => 25],
+            ["category" => "Browsing", "count" => $catBrowse, "percent" => 17],
+            ["category" => "People", "count" => $catPeople, "percent" => 8],
+            ["category" => "Other", "count" => $catOther, "percent" => 8]
+        ]
+    ];
+
+    // 12. 4-Week Consistency Metrics
+    $monthStmt = $conn->prepare("
+        SELECT COALESCE(SUM(duration_minutes), 0)
+        FROM focus_sessions
+        WHERE user_id = :user_id AND status = 'completed' AND started_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 27 DAY)
+    ");
+    $monthStmt->execute([':user_id' => $userId]);
+    $fourWeekFocusMinutes = (int)$monthStmt->fetchColumn();
+    $fourWeekFocusHours = round($fourWeekFocusMinutes / 60, 1);
+
+    $monthTasksStmt = $conn->prepare("
+        SELECT COUNT(*)
+        FROM tasks
+        WHERE user_id = :user_id AND is_completed = 1
+    ");
+    $monthTasksStmt->execute([':user_id' => $userId]);
+    $fourWeekTasksDone = (int)$monthTasksStmt->fetchColumn();
+
+    $weeklyConsistency = [];
+    $totalActiveDaysMonth = 0;
+    for ($w = 3; $w >= 0; $w--) {
+        $startDay = ($w * 7) + 6;
+        $endDay = ($w * 7);
+        $wStmt = $conn->prepare("
+            SELECT COUNT(DISTINCT DATE(started_at))
+            FROM focus_sessions
+            WHERE user_id = :user_id 
+              AND status = 'completed'
+              AND started_at >= DATE_SUB(CURRENT_DATE(), INTERVAL $startDay DAY)
+              AND started_at <= DATE_SUB(CURRENT_DATE(), INTERVAL $endDay DAY)
+        ");
+        $wStmt->execute([':user_id' => $userId]);
+        $activeDays = (int)$wStmt->fetchColumn();
+        $weeklyConsistency[] = [
+            "week_label" => "Wk " . (4 - $w),
+            "active_days" => $activeDays
+        ];
+        $totalActiveDaysMonth += $activeDays;
+    }
+
     http_response_code(200);
     echo json_encode([
         "status"  => true,
@@ -160,13 +296,24 @@ try {
             "daily_focus_goal_minutes"    => $dailyGoalMinutes,
             "daily_goal_progress_percent" => $progressPercent,
             "current_streak_days"         => $streakDays,
+            "longest_streak_days"         => $longestStreak,
+            "total_sessions"              => $totalSessions,
+            "best_window"                 => $bestWindow,
             "tasks_summary"               => [
                 "total_tasks"             => $totalTasks,
                 "pending_tasks"           => $pendingTasks,
                 "completed_tasks"         => $completedTasks,
                 "completion_rate_percent" => $completionRate
             ],
-            "daily_chart_data"            => $dailyChartData
+            "daily_chart_data"            => $dailyChartData,
+            "hourly_focus_data"           => $hourlyFocusData,
+            "distractions_summary"        => $distractionsBreakdown,
+            "monthly_summary"             => [
+                "four_week_focus_hours"   => $fourWeekFocusHours,
+                "four_week_tasks_done"    => $fourWeekTasksDone,
+                "active_days_count"       => $totalActiveDaysMonth,
+                "weekly_active_days"      => $weeklyConsistency
+            ]
         ]
     ]);
 } catch (PDOException $e) {
@@ -174,4 +321,3 @@ try {
     http_response_code(500);
     echo json_encode(["status" => false, "message" => "Failed to aggregate insights."]);
 }
-

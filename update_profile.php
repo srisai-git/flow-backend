@@ -82,17 +82,25 @@ try {
         $params[':name'] = $name;
     }
 
-    if (!empty($email) && filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        // Check if email already exists for another user
-        $emailStmt = $conn->prepare("SELECT id FROM users WHERE email = :email AND id != :id LIMIT 1");
-        $emailStmt->execute([':email' => $email, ':id' => $userId]);
-        if ($emailStmt->fetch()) {
-            http_response_code(409);
-            echo json_encode(["status" => false, "message" => "This email address is already in use by another account."]);
-            exit;
+    if (!empty($email) && filter_var($email, FILTER_VALIDATE_EMAIL) && $email !== 'user@focusflow.app' && $email !== 'email@example.com') {
+        // Only validate if email is actually being changed from current user's email
+        $currEmailStmt = $conn->prepare("SELECT email FROM users WHERE id = :id LIMIT 1");
+        $currEmailStmt->execute([':id' => $userId]);
+        $currUser = $currEmailStmt->fetch();
+        $currEmail = strtolower(trim($currUser['email'] ?? ''));
+
+        if (strtolower(trim($email)) !== $currEmail) {
+            // Check if email already exists for another user
+            $emailStmt = $conn->prepare("SELECT id FROM users WHERE email = :email AND id != :id LIMIT 1");
+            $emailStmt->execute([':email' => $email, ':id' => $userId]);
+            if ($emailStmt->fetch()) {
+                http_response_code(409);
+                echo json_encode(["status" => false, "message" => "This email address is already in use by another account."]);
+                exit;
+            }
+            $fields[] = "email = :email";
+            $params[':email'] = $email;
         }
-        $fields[] = "email = :email";
-        $params[':email'] = $email;
     }
 
     if ($bio !== '') {
