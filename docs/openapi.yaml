@@ -1,0 +1,85 @@
+openapi: 3.0.3
+info:
+  title: FocusFlow Backend API
+  version: 1.0.0
+  description: REST API specification for FocusFlow productivity, focus timer, task and habit management.
+servers:
+  - url: http://localhost/flow_backend
+    description: Local Development Server
+
+paths:
+  /health.php:
+    get:
+      summary: Health check endpoint
+      responses:
+        '200':
+          description: Service is healthy
+        '503':
+          description: Service is degraded
+
+  /tasks.php:
+    get:
+      summary: Get tasks for user
+      parameters:
+        - name: user_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of user tasks
+    post:
+      summary: Create or modify task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: integer
+                title:
+                  type: string
+                priority:
+                  type: string
+      responses:
+        '200':
+          description: Task operation success
+
+  /log_session.php:
+    post:
+      summary: Log completed focus session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: integer
+                duration_minutes:
+                  type: integer
+                session_type:
+                  type: string
+      responses:
+        '200':
+          description: Session logged successfully
+
+  /ask_groot.php:
+    post:
+      summary: Prompt Groot AI assistant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+      responses:
+        '200':
+          description: Groot AI response
