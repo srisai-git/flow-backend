@@ -115,6 +115,33 @@ def health():
 @app.post("/v1/chat/completions")
 def chat_completions(req: ChatCompletionRequest):
     messages = req.messages or []
+    user_content = ""
+    for m in reversed(messages):
+        if m.role == "user":
+            user_content = m.content
+            break
+    if not user_content and req.prompt:
+        user_content = req.prompt
+    
+    # Ultra-low latency intercept for off-topic queries (< 10ms)
+    if user_content and OFF_TOPIC_RE.search(user_content):
+        return {
+            "id": "chatcmpl-groot-decline",
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": DECLINE_MESSAGE
+                    },
+                    "finish_reason": "stop"
+                }
+            ],
+            "reply": DECLINE_MESSAGE,
+            "insight": DECLINE_MESSAGE,
+            "success": True
+        }
     if not messages and req.prompt:
         messages = [
             Message(role="system", content=SYSTEM_PERSONA),
