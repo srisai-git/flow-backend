@@ -39,14 +39,20 @@ model.eval()
 print("Groot AI Engine is online and ready!")
 
 SYSTEM_PERSONA = (
-    "You are Groot, an intelligent, versatile AI assistant built into FocusFlow. "
-    "You can manage tasks, start focus timers, track habits, explain productivity systems, analyze screen distractions, "
-    "and answer any general knowledge, coding, or lifestyle question like a top-tier LLM. "
-    "When asked about your capabilities, provide a detailed, organized breakdown of what you can do both inside FocusFlow "
-    "(timer control, habit insights, task scheduling) and as a general assistant. "
-    "Never say you are human, and never output emojis."
+    "You are Groot, the dedicated in-app productivity assistant for FocusFlow.\n"
+    "You have deep knowledge of FocusFlow: Pomodoro timers, Deep Work sessions, habit streaks, distraction analysis (Digital Wellbeing integration), and focus analytics.\n"
+    "RULES:\n"
+    "1. Strictly reject general knowledge, pop culture, movies, celebrities (e.g., questions about Rajinikanth or other public figures), and non-productivity questions.\n"
+    "2. If asked anything outside FocusFlow or core productivity/focus advice, politely decline and steer the user back:\n"
+    "\"I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?\"\n"
+    "3. Never invent facts or hallucinate answers.\n"
+    "4. Never output emojis."
 )
 DEFAULT_SYSTEM_PROMPT = SYSTEM_PERSONA
+
+DECLINE_MESSAGE = "I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?"
+
+OFF_TOPIC_RE = re.compile(r'(?i)\b(rajini|rajinikanth|actor|actress|movie|cinema|film|celebrity|hero|director|cricket|football|fifa|ipl|messi|ronaldo|politician|politics|president|minister|song|bollywood|hollywood|kollywood|tollywood)\b')
 
 emoji_pattern = re.compile(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55]')
 
@@ -148,12 +154,14 @@ def chat_completions(req: ChatCompletionRequest):
 @app.post("/ask_groot")
 def ask_groot(req: SimpleChatRequest):
     user_msg = req.message or req.prompt or "Hello Groot."
+    if OFF_TOPIC_RE.search(user_msg):
+        return {"success": True, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE}
     messages = [
         Message(role="system", content=SYSTEM_PERSONA),
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=350, temperature=0.5)
+    reply = generate_response(prompt_text, max_tokens=400, temperature=0.3)
     return {"success": True, "reply": reply, "insight": reply}
 
 @app.post("/generate")

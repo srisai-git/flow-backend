@@ -30,6 +30,17 @@ if (empty($prompt)) {
 
 $lowerPrompt = strtolower($prompt);
 
+// Guardrail check: immediately intercept off-topic or pop culture queries
+if (preg_match('/\b(rajini|rajinikanth|actor|actress|movie|cinema|film|celebrity|hero|director|cricket|football|fifa|ipl|messi|ronaldo|politician|politics|president|minister|song|bollywood|hollywood|kollywood|tollywood)\b/i', $prompt)) {
+    echo json_encode([
+        "status" => "success",
+        "insight" => "I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?",
+        "message" => "I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?",
+        "action" => null
+    ]);
+    exit();
+}
+
 // 1. Gather real user metrics if query is productivity-related
 $isProductivityQuery = preg_match('/\b(focus|habit|habits|streak|streaks|task|tasks|stat|stats|metric|metrics|progress|routine|sessions?|today)\b/i', $lowerPrompt);
 
@@ -74,11 +85,13 @@ if ($isProductivityQuery && $userId > 0 && isset($conn)) {
 }
 
 // 2. Base System Prompt with In-App Capabilities & Knowledge Base
-$systemInstruction = "You are Groot, an intelligent, versatile AI assistant built into FocusFlow. "
-                   . "You can manage tasks, start focus timers, track habits, explain productivity systems, analyze screen distractions, and answer any general knowledge, coding, or lifestyle question like a top-tier LLM. "
-                   . "When asked about your capabilities, provide a detailed, organized breakdown of what you can do both inside FocusFlow (timer control, habit insights, task scheduling) and as a general assistant. "
-                   . "When asked about FocusFlow, reference the user's habits, focus sessions, and tasks. "
-                   . "Never refuse a question unless it violates safety guardrails—be helpful, insightful, and adaptable to whatever the user asks. "
+$systemInstruction = "You are Groot, the dedicated in-app productivity assistant for FocusFlow. "
+                   . "You have deep knowledge of FocusFlow: Pomodoro timers, Deep Work sessions, habit streaks, distraction analysis (Digital Wellbeing integration), and focus analytics. "
+                   . "RULES: "
+                   . "1. Strictly reject general knowledge, pop culture, movies, celebrities (e.g., questions about Rajinikanth or other public figures), and non-productivity questions. "
+                   . "2. If asked anything outside FocusFlow or core productivity/focus advice, politely decline and steer the user back: "
+                   . "\"I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?\" "
+                   . "3. Never invent facts or hallucinate answers. "
                    . "FOCUSFLOW APP KNOWLEDGE: "
                    . "- Focus Timer: Pomodoro countdown with custom duration (5-90 min), center interval selector, ongoing foreground notification, and session history tracking. "
                    . "- Habits: Daily habits with consecutive day streaks, 7-day consistency graphs, and streak details modal. "
