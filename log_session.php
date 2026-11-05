@@ -67,23 +67,36 @@ $userId          = (int)($input['user_id'] ?? 1);
 $durationMinutes = (int)($input['duration_minutes'] ?? 25);
 $sessionType     = trim($input['session_type'] ?? 'pomodoro');
 $taskId          = !empty($input['task_id']) ? (int)$input['task_id'] : null;
-$status          = 'completed';
+$status          = !empty($input['status']) && in_array(trim($input['status']), ['completed', 'abandoned']) ? trim($input['status']) : 'completed';
 
+if ($durationMinutes <= 0 && isset($input['duration_seconds'])) {
+    $durationMinutes = max(1, (int)round((int)$input['duration_seconds'] / 60));
+}
 if ($durationMinutes <= 0) {
     $durationMinutes = 1;
 }
 
+$now = date('Y-m-d H:i:s');
+$completedAt = !empty($input['completed_at']) ? trim((string)$input['completed_at']) : $now;
+if (!empty($input['started_at'])) {
+    $startedAt = trim((string)$input['started_at']);
+} else {
+    $startedAt = date('Y-m-d H:i:s', strtotime("-{$durationMinutes} minutes", strtotime($completedAt)));
+}
+
 try {
     $stmt = $conn->prepare("
-        INSERT INTO focus_sessions (user_id, task_id, duration_minutes, session_type, status, started_at, completed_at)
-        VALUES (:uid, :tid, :dur, :type, :stat, DATE_SUB(NOW(), INTERVAL :dur MINUTE), NOW())
+        INSERT INTO focus_sessions (user_id, task_id, duration_minutes, session_type, status, started_at, completed_at, created_at)
+        VALUES (:uid, :tid, :dur, :type, :stat, :start, :end, NOW())
     ");
     $stmt->execute([
-        ':uid'  => $userId,
-        ':tid'  => $taskId,
-        ':dur'  => $durationMinutes,
-        ':type' => $sessionType,
-        ':stat' => $status
+        ':uid'   => $userId,
+        ':tid'   => $taskId,
+        ':dur'   => $durationMinutes,
+        ':type'  => $sessionType,
+        ':stat'  => $status,
+        ':start' => $startedAt,
+        ':end'   => $completedAt
     ]);
 
     // Calculate today's total focus minutes
@@ -96,7 +109,8 @@ try {
     $todayTotalMinutes = (int)$sumStmt->fetchColumn();
 
     echo json_encode([
-        "status" => true,
+        "status" => "success",
+        "success" => true,
         "message" => "Focus session logged successfully.",
         "session_id" => (int)$conn->lastInsertId(),
         "duration_minutes" => $durationMinutes,
@@ -104,5 +118,5 @@ try {
     ]);
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(["status" => false, "message" => "Database error: " . $e->getMessage()]);
+    echo json_encode(["status" => "error", "message" => "Database error: " . $e->getMessage()]);
 }
