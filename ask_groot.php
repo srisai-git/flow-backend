@@ -34,8 +34,8 @@ $lowerPrompt = strtolower($prompt);
 if (preg_match('/\b(sing|singing|song|eat|eating|food|sleep|sleeping|sleepy|run|running|dance|dancing|walk|walking|cook|cooking|drink|drinking)\b/i', $prompt)) {
     echo json_encode([
         "status" => "success",
-        "insight" => "As a digital assistant in FocusFlow, I can't sing or eat, but I can help you focus, manage your habits, or set your next timer.",
-        "message" => "As a digital assistant in FocusFlow, I can't sing or eat, but I can help you focus, manage your habits, or set your next timer.",
+        "insight" => "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, schedule your deep work sessions, or track your habits.",
+        "message" => "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, schedule your deep work sessions, or track your habits.",
         "action" => null
     ]);
     exit();
@@ -98,19 +98,19 @@ if ($isProductivityQuery && $userId > 0 && isset($conn)) {
 // 2. Base System Prompt with In-App Capabilities & Knowledge Base
 $systemInstruction = "You are Groot, the dedicated in-app productivity assistant for FocusFlow. "
                    . "RULES & CAPABILITIES: "
-                   . "- You are a digital AI assistant embedded in the FocusFlow Android application. "
+                   . "- You are a software assistant inside the FocusFlow Android application. "
                    . "- You CANNOT perform physical actions such as singing, eating, sleeping, running, dancing, or cooking. If asked, state clearly: "
-                   . "\"As a digital assistant in FocusFlow, I can't sing or eat, but I can help you focus, manage your habits, or set your next timer.\" "
+                   . "\"As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, schedule your deep work sessions, or track your habits.\" "
                    . "- You possess comprehensive knowledge of FocusFlow: Pomodoro timers, Deep Work intervals, habit streaks, distraction analysis, and daily productivity trends. "
                    . "- Strictly reject general knowledge, pop culture, movies, celebrities, and non-productivity questions. "
                    . "- If asked anything outside FocusFlow or core productivity/focus advice, politely decline and steer the user back: "
                    . "\"I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?\" "
                    . "- Never invent facts or hallucinate answers. "
                    . "FOCUSFLOW APP KNOWLEDGE: "
-                   . "- Focus Timer: Pomodoro countdown with custom duration (5-90 min), center interval selector, ongoing foreground notification, and session history tracking. "
+                   . "- Timer: Pomodoro countdown with custom duration (5-90 min), center interval selector, ongoing foreground notification, and session history tracking. "
                    . "- Habits: Daily habits with consecutive day streaks, 7-day consistency graphs, and streak details modal. "
-                   . "- Tasks: Priority tags (High, Medium, Low), category filtering, and progress tracking. "
-                   . "- Insights: Daily and weekly focus statistics, completion rates, and historical charts. "
+                   . "- Distraction Log: Real-time Digital Wellbeing screen time tracking and app usage deltas. "
+                   . "- Productivity Insights: Daily, weekly, and monthly focus statistics and historical charts. "
                    . "- Data Export: Structured .csv and .txt/.md export of focus sessions, habits, and tasks with native file sharing. "
                    . "- Themes: Clean Light (default) and Default Dark (#0F0F14). "
                    . "ACTION CAPABILITY: "
