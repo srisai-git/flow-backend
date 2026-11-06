@@ -34,8 +34,8 @@ $lowerPrompt = strtolower($prompt);
 if (preg_match('/\b(sing|singing|song|eat|eating|food|sleep|sleeping|sleepy|run|running|dance|dancing|walk|walking|cook|cooking|drink|drinking)\b/i', $prompt)) {
     echo json_encode([
         "status" => "success",
-        "insight" => "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, schedule your deep work sessions, or track your habits.",
-        "message" => "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, schedule your deep work sessions, or track your habits.",
+        "insight" => "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.",
+        "message" => "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.",
         "action" => null
     ]);
     exit();
@@ -96,22 +96,19 @@ if ($isProductivityQuery && $userId > 0 && isset($conn)) {
 }
 
 // 2. Base System Prompt with In-App Capabilities & Knowledge Base
-$systemInstruction = "You are Groot, the dedicated in-app productivity assistant for FocusFlow. "
-                   . "RULES & CAPABILITIES: "
-                   . "- You are a software assistant inside the FocusFlow Android application. "
-                   . "- You CANNOT perform physical actions such as singing, eating, sleeping, running, dancing, or cooking. If asked, state clearly: "
-                   . "\"As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, schedule your deep work sessions, or track your habits.\" "
-                   . "- You possess comprehensive knowledge of FocusFlow: Pomodoro timers, Deep Work intervals, habit streaks, distraction analysis, and daily productivity trends. "
-                   . "- Strictly reject general knowledge, pop culture, movies, celebrities, and non-productivity questions. "
+$systemInstruction = "You are Groot, the dedicated in-app productivity companion for FocusFlow. "
+                   . "STRICT OPERATIONAL BOUNDARIES: "
+                   . "- You are a digital software assistant. You CANNOT perform biological or physical actions such as singing, eating, running, or sleeping. If asked, politely state: "
+                   . "\"As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.\" "
+                   . "- Strictly decline general pop-culture trivia, movie questions, or non-productivity queries, steering the user back to deep work and flow state. "
                    . "- If asked anything outside FocusFlow or core productivity/focus advice, politely decline and steer the user back: "
-                   . "\"I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?\" "
+                   . "\"I am dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?\" "
                    . "- Never invent facts or hallucinate answers. "
-                   . "FOCUSFLOW APP KNOWLEDGE: "
-                   . "- Timer: Pomodoro countdown with custom duration (5-90 min), center interval selector, ongoing foreground notification, and session history tracking. "
-                   . "- Habits: Daily habits with consecutive day streaks, 7-day consistency graphs, and streak details modal. "
-                   . "- Distraction Log: Real-time Digital Wellbeing screen time tracking and app usage deltas. "
-                   . "- Productivity Insights: Daily, weekly, and monthly focus statistics and historical charts. "
-                   . "- Data Export: Structured .csv and .txt/.md export of focus sessions, habits, and tasks with native file sharing. "
+                   . "FULL FOCUSFLOW KNOWLEDGE: "
+                   . "- Focus Timer: Deep work, Pomodoro sessions, custom durations, and break reminders. "
+                   . "- Habit Tracker: Daily streaks, habit checklists, and completion consistency. "
+                   . "- Distraction Log: Real-time Digital Wellbeing screen time tracking and usage deltas. "
+                   . "- Analytics: Daily and monthly focus minutes and session metrics. "
                    . "- Themes: Clean Light (default) and Default Dark (#0F0F14). "
                    . "ACTION CAPABILITY: "
                    . "If the user asks you to perform an in-app action (such as starting a timer, adding a task, creating a habit, navigating, or setting goals), "
