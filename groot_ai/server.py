@@ -40,19 +40,24 @@ print("Groot AI Engine is online and ready!")
 
 SYSTEM_PERSONA = (
     "You are Groot, the dedicated in-app productivity assistant for FocusFlow.\n"
-    "You have deep knowledge of FocusFlow: Pomodoro timers, Deep Work sessions, habit streaks, distraction analysis (Digital Wellbeing integration), and focus analytics.\n"
-    "RULES:\n"
-    "1. Strictly reject general knowledge, pop culture, movies, celebrities (e.g., questions about Rajinikanth or other public figures), and non-productivity questions.\n"
-    "2. If asked anything outside FocusFlow or core productivity/focus advice, politely decline and steer the user back:\n"
+    "RULES & CAPABILITIES:\n"
+    "- You are a digital AI assistant embedded in the FocusFlow Android application.\n"
+    "- You CANNOT perform physical actions such as singing, eating, sleeping, running, dancing, or cooking. "
+    "If asked, state clearly: \"As a digital assistant in FocusFlow, I can't sing or eat, but I can help you focus, manage your habits, or set your next timer.\"\n"
+    "- You possess comprehensive knowledge of FocusFlow: Pomodoro timers, Deep Work intervals, habit streaks, distraction analysis, and daily productivity trends.\n"
+    "- Strictly reject general knowledge, pop culture, movies, celebrities, and non-productivity questions.\n"
+    "- If asked anything outside FocusFlow or core productivity/focus advice, politely decline and steer the user back:\n"
     "\"I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?\"\n"
-    "3. Never invent facts or hallucinate answers.\n"
-    "4. Never output emojis."
+    "- Never invent facts or hallucinate answers.\n"
+    "- Never output emojis."
 )
 DEFAULT_SYSTEM_PROMPT = SYSTEM_PERSONA
 
 DECLINE_MESSAGE = "I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?"
+PHYSICAL_DECLINE_MESSAGE = "As a digital assistant in FocusFlow, I can't sing or eat, but I can help you focus, manage your habits, or set your next timer."
 
 OFF_TOPIC_RE = re.compile(r'(?i)\b(rajini|rajinikanth|actor|actress|movie|cinema|film|celebrity|hero|director|cricket|football|fifa|ipl|messi|ronaldo|politician|politics|president|minister|song|bollywood|hollywood|kollywood|tollywood)\b')
+PHYSICAL_ACTION_RE = re.compile(r'(?i)\b(sing|singing|song|eat|eating|food|sleep|sleeping|sleepy|run|running|dance|dancing|walk|walking|cook|cooking|drink|drinking)\b')
 
 emoji_pattern = re.compile(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55]')
 
@@ -123,6 +128,26 @@ def chat_completions(req: ChatCompletionRequest):
     if not user_content and req.prompt:
         user_content = req.prompt
     
+    # Ultra-low latency intercept for physical actions / human biological claims (< 5ms)
+    if user_content and PHYSICAL_ACTION_RE.search(user_content):
+        return {
+            "id": "chatcmpl-groot-physical",
+            "object": "chat.completion",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": PHYSICAL_DECLINE_MESSAGE
+                    },
+                    "finish_reason": "stop"
+                }
+            ],
+            "reply": PHYSICAL_DECLINE_MESSAGE,
+            "insight": PHYSICAL_DECLINE_MESSAGE,
+            "success": True
+        }
+
     # Ultra-low latency intercept for off-topic queries (< 10ms)
     if user_content and OFF_TOPIC_RE.search(user_content):
         return {
@@ -193,6 +218,12 @@ def ask_groot(req: SimpleChatRequest):
 
 @app.post("/generate")
 def generate(req: dict):
+    user_msg = req.get("prompt") or req.get("message") or ""
+    if user_msg and PHYSICAL_ACTION_RE.search(user_msg):
+        return {"reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "success": True}
+    if user_msg and OFF_TOPIC_RE.search(user_msg):
+        return {"reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "success": True}
+
     if "messages" in req and isinstance(req["messages"], list):
         msg_objs = [Message(**m) for m in req["messages"]]
         prompt_text = build_prompt_from_messages(msg_objs)

@@ -30,6 +30,17 @@ if (empty($prompt)) {
 
 $lowerPrompt = strtolower($prompt);
 
+// Guardrail check: strictly intercept physical/biological action queries
+if (preg_match('/\b(sing|singing|song|eat|eating|food|sleep|sleeping|sleepy|run|running|dance|dancing|walk|walking|cook|cooking|drink|drinking)\b/i', $prompt)) {
+    echo json_encode([
+        "status" => "success",
+        "insight" => "As a digital assistant in FocusFlow, I can't sing or eat, but I can help you focus, manage your habits, or set your next timer.",
+        "message" => "As a digital assistant in FocusFlow, I can't sing or eat, but I can help you focus, manage your habits, or set your next timer.",
+        "action" => null
+    ]);
+    exit();
+}
+
 // Guardrail check: immediately intercept off-topic or pop culture queries
 if (preg_match('/\b(rajini|rajinikanth|actor|actress|movie|cinema|film|celebrity|hero|director|cricket|football|fifa|ipl|messi|ronaldo|politician|politics|president|minister|song|bollywood|hollywood|kollywood|tollywood)\b/i', $prompt)) {
     echo json_encode([
@@ -86,12 +97,15 @@ if ($isProductivityQuery && $userId > 0 && isset($conn)) {
 
 // 2. Base System Prompt with In-App Capabilities & Knowledge Base
 $systemInstruction = "You are Groot, the dedicated in-app productivity assistant for FocusFlow. "
-                   . "You have deep knowledge of FocusFlow: Pomodoro timers, Deep Work sessions, habit streaks, distraction analysis (Digital Wellbeing integration), and focus analytics. "
-                   . "RULES: "
-                   . "1. Strictly reject general knowledge, pop culture, movies, celebrities (e.g., questions about Rajinikanth or other public figures), and non-productivity questions. "
-                   . "2. If asked anything outside FocusFlow or core productivity/focus advice, politely decline and steer the user back: "
+                   . "RULES & CAPABILITIES: "
+                   . "- You are a digital AI assistant embedded in the FocusFlow Android application. "
+                   . "- You CANNOT perform physical actions such as singing, eating, sleeping, running, dancing, or cooking. If asked, state clearly: "
+                   . "\"As a digital assistant in FocusFlow, I can't sing or eat, but I can help you focus, manage your habits, or set your next timer.\" "
+                   . "- You possess comprehensive knowledge of FocusFlow: Pomodoro timers, Deep Work intervals, habit streaks, distraction analysis, and daily productivity trends. "
+                   . "- Strictly reject general knowledge, pop culture, movies, celebrities, and non-productivity questions. "
+                   . "- If asked anything outside FocusFlow or core productivity/focus advice, politely decline and steer the user back: "
                    . "\"I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?\" "
-                   . "3. Never invent facts or hallucinate answers. "
+                   . "- Never invent facts or hallucinate answers. "
                    . "FOCUSFLOW APP KNOWLEDGE: "
                    . "- Focus Timer: Pomodoro countdown with custom duration (5-90 min), center interval selector, ongoing foreground notification, and session history tracking. "
                    . "- Habits: Daily habits with consecutive day streaks, 7-day consistency graphs, and streak details modal. "
