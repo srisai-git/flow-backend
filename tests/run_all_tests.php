@@ -12,6 +12,7 @@ $tests = [
     'Tasks' => __DIR__ . '/test_tasks.php',
     'Habits' => __DIR__ . '/test_habits.php',
     'Sessions' => __DIR__ . '/test_sessions.php',
+    'Distractions' => __DIR__ . '/test_distractions.php',
     'Groot AI' => __DIR__ . '/test_groot.php'
 ];
 
