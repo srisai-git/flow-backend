@@ -13,9 +13,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
 require_once __DIR__ . '/config/db.php';
 
 $json = getJsonInput();
-$input = !empty($json) ? $json : $_REQUEST;
+$input = array_merge($_GET, $_POST, $json);
 
-$prompt = trim($input['prompt'] ?? $input['message'] ?? $input['query'] ?? '');
+$prompt = trim($input['prompt'] ?? $input['message'] ?? $input['query'] ?? $input['text'] ?? '');
 $userId = intval($input['user_id'] ?? $input['userId'] ?? 1);
 $history = isset($input['history']) && is_array($input['history']) ? $input['history'] : [];
 

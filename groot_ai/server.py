@@ -96,27 +96,26 @@ def build_prompt_from_messages(messages: List[Union[Message, dict]]) -> str:
     parts.append("<|im_start|>assistant\n")
     return "\n".join(parts)
 
-def generate_response(prompt_text: str, max_tokens: int = 600, temperature: float = 0.5, top_p: float = 0.9) -> str:
+def generate_response(prompt_text: str, max_tokens: int = 180, temperature: float = 0.5, top_p: float = 0.9) -> str:
     inputs = tokenizer(prompt_text, return_tensors="pt")
     if use_cuda:
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
     
-    with torch.no_grad():
+    with torch.inference_mode():
         outputs = model.generate(
             **inputs,
-            max_new_tokens=max_tokens,
+            max_new_tokens=min(max_tokens, 180),
             temperature=temperature,
             top_p=top_p,
             repetition_penalty=1.1,
             pad_token_id=tokenizer.eos_token_id,
-            do_sample=True if temperature > 0 else False
+            do_sample=True if temperature > 0 else False,
+            early_stopping=True
         )
     
     generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
     reply = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
     reply = reply.replace("<|im_end|>", "").strip()
-    
-    # Strictly purge any emojis
     reply = emoji_pattern.sub('', reply).strip()
     return reply
 
@@ -188,7 +187,7 @@ def chat_completions(req: ChatCompletionRequest):
         ]
     
     prompt_text = build_prompt_from_messages(messages)
-    max_tokens = min(req.max_tokens or 350, 512)
+    max_tokens = min(req.max_tokens or 180, 180)
     temp = req.temperature if req.temperature is not None else 0.5
     top_p = req.top_p if req.top_p is not None else 0.9
     
@@ -210,6 +209,8 @@ def chat_completions(req: ChatCompletionRequest):
         "response": reply,
         "reply": reply,
         "insight": reply,
+        "message": reply,
+        "status": "success",
         "success": True
     }
 
@@ -217,54 +218,60 @@ def chat_completions(req: ChatCompletionRequest):
 def ask_groot(req: SimpleChatRequest):
     user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
     if PHYSICAL_ACTION_RE.search(user_msg):
-        return {"success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE}
+        return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE}
     if OFF_TOPIC_RE.search(user_msg):
-        return {"success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE}
+        return {"status": "success", "success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "message": DECLINE_MESSAGE}
     messages = [
         Message(role="system", content=SYSTEM_PERSONA),
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=400, temperature=0.3)
-    return {"success": True, "response": reply, "reply": reply, "insight": reply}
+    reply = generate_response(prompt_text, max_tokens=180, temperature=0.3)
+    return {"status": "success", "success": True, "response": reply, "reply": reply, "insight": reply, "message": reply}
 
 @app.post("/predict")
 def predict(req: SimpleChatRequest):
     user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
     if PHYSICAL_ACTION_RE.search(user_msg):
         return {
+            "status": "success",
             "success": True,
             "response": PHYSICAL_DECLINE_MESSAGE,
             "reply": PHYSICAL_DECLINE_MESSAGE,
-            "insight": PHYSICAL_DECLINE_MESSAGE
+            "insight": PHYSICAL_DECLINE_MESSAGE,
+            "message": PHYSICAL_DECLINE_MESSAGE
         }
     if OFF_TOPIC_RE.search(user_msg):
         return {
+            "status": "success",
             "success": True,
             "response": DECLINE_MESSAGE,
             "reply": DECLINE_MESSAGE,
-            "insight": DECLINE_MESSAGE
+            "insight": DECLINE_MESSAGE,
+            "message": DECLINE_MESSAGE
         }
     messages = [
         Message(role="system", content=SYSTEM_PERSONA),
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=400, temperature=0.3)
+    reply = generate_response(prompt_text, max_tokens=180, temperature=0.3)
     return {
+        "status": "success",
         "success": True,
         "response": reply,
         "reply": reply,
-        "insight": reply
+        "insight": reply,
+        "message": reply
     }
 
 @app.post("/generate")
 def generate(req: dict):
     user_msg = req.get("prompt") or req.get("message") or req.get("query") or ""
     if user_msg and PHYSICAL_ACTION_RE.search(user_msg):
-        return {"response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "success": True}
+        return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE}
     if user_msg and OFF_TOPIC_RE.search(user_msg):
-        return {"response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "success": True}
+        return {"status": "success", "success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "message": DECLINE_MESSAGE}
 
     if "messages" in req and isinstance(req["messages"], list):
         msg_objs = [Message(**m) if isinstance(m, dict) else m for m in req["messages"]]
@@ -277,8 +284,8 @@ def generate(req: dict):
         ]
         prompt_text = build_prompt_from_messages(messages)
     
-    reply = generate_response(prompt_text, max_tokens=350, temperature=0.5)
-    return {"response": reply, "reply": reply, "insight": reply, "success": True}
+    reply = generate_response(prompt_text, max_tokens=180, temperature=0.5)
+    return {"status": "success", "success": True, "response": reply, "reply": reply, "insight": reply, "message": reply}
 
 if __name__ == "__main__":
     import uvicorn
