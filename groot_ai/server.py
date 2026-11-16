@@ -11,7 +11,6 @@ from peft import PeftModel
 
 app = FastAPI(title="Groot AI Engine")
 
-# Base model identifier and path to fine-tuned weights
 base_model_id = "Qwen/Qwen2.5-0.5B-Instruct"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 adapter_path = os.path.join(script_dir, "groot_model")
@@ -134,7 +133,6 @@ def chat_completions(req: ChatCompletionRequest):
     if not user_content and req.prompt:
         user_content = req.prompt
     
-    # Ultra-low latency intercept for physical actions / human biological claims (< 5ms)
     if user_content and PHYSICAL_ACTION_RE.search(user_content):
         return {
             "id": "chatcmpl-groot-physical",
@@ -155,7 +153,6 @@ def chat_completions(req: ChatCompletionRequest):
             "success": True
         }
 
-    # Ultra-low latency intercept for off-topic queries (< 10ms)
     if user_content and OFF_TOPIC_RE.search(user_content):
         return {
             "id": "chatcmpl-groot-decline",
@@ -286,6 +283,58 @@ def generate(req: dict):
     
     reply = generate_response(prompt_text, max_tokens=180, temperature=0.5)
     return {"status": "success", "success": True, "response": reply, "reply": reply, "insight": reply, "message": reply}
+
+class TaskBreakdownRequest(BaseModel):
+    task_title: Optional[str] = None
+    title: Optional[str] = None
+    prompt: Optional[str] = None
+
+@app.post("/breakdown_task")
+@app.post("/task/breakdown")
+def breakdown_task(req: TaskBreakdownRequest):
+    raw_title = req.task_title or req.title or req.prompt or ""
+    task_name = raw_title.strip()
+    if not task_name:
+        return {
+            "status": "error",
+            "success": False,
+            "message": "Task title is required",
+            "task": "",
+            "subtasks": []
+        }
+    
+    subtasks = []
+    try:
+        user_prompt = f"Break down this task into 3 or 4 short actionable steps: '{task_name}'. Output each step on its own line without numbering or bullets."
+        messages = [
+            Message(role="system", content="You are Groot, a productivity assistant. Provide 3 or 4 short, actionable subtasks, one per line."),
+            Message(role="user", content=user_prompt)
+        ]
+        prompt_text = build_prompt_from_messages(messages)
+        raw_output = generate_response(prompt_text, max_tokens=120, temperature=0.3)
+        lines = [line.strip().lstrip("-*1234567890. ") for line in raw_output.splitlines() if line.strip()]
+        for l in lines:
+            if len(l) > 3 and not l.lower().startswith("here are") and not l.lower().startswith("subtask"):
+                subtasks.append(l)
+            if len(subtasks) == 4:
+                break
+    except Exception:
+        pass
+
+    if len(subtasks) < 3:
+        subtasks = [
+            f"Define requirements and scope for {task_name}",
+            f"Draft initial implementation for {task_name}",
+            f"Review, test and verify {task_name}",
+            f"Finalize and mark {task_name} complete"
+        ]
+
+    return {
+        "status": "success",
+        "success": True,
+        "task": task_name,
+        "subtasks": subtasks[:4]
+    }
 
 if __name__ == "__main__":
     import uvicorn
