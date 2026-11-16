@@ -1,10 +1,9 @@
 <?php
-// streaks.php
 require_once __DIR__ . '/config/db.php';
 
 header('Content-Type: application/json');
 
-$method = $_SERVER['REQUEST_METHOD'];
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $json = getJsonInput();
 $input = !empty($json) ? $json : $_REQUEST;
 
@@ -15,12 +14,15 @@ if (empty($userId) || !is_numeric($userId)) {
 $userId = (int)$userId;
 
 try {
-    // 1. Gather all unique active dates (from both focus sessions and habit logs)
     $stmt = $conn->prepare("
         SELECT DISTINCT activity_date FROM (
-            SELECT DATE(created_at) as activity_date FROM focus_sessions WHERE user_id = :uid1
+            SELECT DATE(created_at) as activity_date 
+            FROM focus_sessions 
+            WHERE user_id = :uid1 AND status = 'completed' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
             UNION
-            SELECT completed_date as activity_date FROM habit_logs WHERE user_id = :uid2
+            SELECT completed_date as activity_date 
+            FROM habit_logs 
+            WHERE user_id = :uid2 AND completed_date >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
         ) combined
         ORDER BY activity_date DESC
     ");
@@ -33,12 +35,10 @@ try {
     $lastActiveDate = $dates[0] ?? null;
 
     if (!empty($dates)) {
-        // Calculate current streak
         $today = new DateTime('today');
         $yesterday = (new DateTime('today'))->modify('-1 day');
         $checkDate = new DateTime($dates[0]);
 
-        // Current streak is alive if latest activity was today or yesterday
         if ($checkDate == $today || $checkDate == $yesterday) {
             $expected = clone $checkDate;
             foreach ($dates as $d) {
@@ -52,10 +52,8 @@ try {
             }
         }
 
-        // Calculate longest streak historically
         $tempStreak = 0;
         $prevDate = null;
-        // Sort ascending for longest streak calculation
         $ascDates = array_reverse($dates);
         foreach ($ascDates as $d) {
             $cur = new DateTime($d);
@@ -80,7 +78,6 @@ try {
         $longestStreak = $currentStreak;
     }
 
-    // Handle POST updates if supplied
     if ($method === 'POST') {
         $reportedStreak = (int)($input['streak_count'] ?? 0);
         if ($reportedStreak > $currentStreak) {
@@ -107,4 +104,3 @@ try {
         'message' => $e->getMessage()
     ], 500);
 }
-

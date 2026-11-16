@@ -1,53 +1,44 @@
 <?php
-// get_dashboard.php
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/migrations.php';
 
-// Fast migration cache check to eliminate schema catalog locking on every API hit
-$migrationFlag = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow_migrated_v3';
-if (!file_exists($migrationFlag)) {
-    try {
-        runAllMigrations($conn);
-        @touch($migrationFlag);
-    } catch (PDOException $e) {
-        error_log("Dashboard Migration Error: " . $e->getMessage());
-    }
-}
+try {
+    runAllMigrations($conn);
+} catch (PDOException $e) {}
 
 $userId = (int)($_GET['user_id'] ?? $_POST['user_id'] ?? 1);
 
 try {
-    // 1. Get user name & avatar
     $uStmt = $conn->prepare("SELECT name, avatar FROM users WHERE id = :id LIMIT 1");
     $uStmt->execute([':id' => $userId]);
     $user = $uStmt->fetch();
     $userName = $user ? $user['name'] : "Sri Sai";
     $userAvatar = $user ? ($user['avatar'] ?? '') : "";
 
-    // 2. Get today's total focus minutes
     $focusStmt = $conn->prepare("
         SELECT COALESCE(SUM(duration_minutes), 0)
         FROM focus_sessions
-        WHERE user_id = :uid AND DATE(created_at) = CURDATE()
+        WHERE user_id = :uid AND status = 'completed' AND created_at >= CURDATE()
     ");
     $focusStmt->execute([':uid' => $userId]);
     $focusMinutesToday = (int)$focusStmt->fetchColumn();
 
-    // 3. Get user's daily goal minutes from preferences
     $prefStmt = $conn->prepare("SELECT daily_focus_goal_minutes FROM user_preferences WHERE user_id = :uid LIMIT 1");
     $prefStmt->execute([':uid' => $userId]);
-    $goalMinutes = (int)($prefStmt->fetchColumn() ?: 240); // default 4 hrs = 240 mins
+    $goalMinutes = (int)($prefStmt->fetchColumn() ?: 240);
 
-    // 4. Pending task count & completed task count
-    $pendingStmt = $conn->prepare("SELECT COUNT(*) FROM tasks WHERE user_id = :uid AND is_completed = 0");
-    $pendingStmt->execute([':uid' => $userId]);
-    $pendingTaskCount = (int)$pendingStmt->fetchColumn();
+    $taskCountsStmt = $conn->prepare("
+        SELECT 
+            COALESCE(SUM(CASE WHEN is_completed = 0 THEN 1 ELSE 0 END), 0) AS pending_count,
+            COALESCE(SUM(CASE WHEN is_completed = 1 THEN 1 ELSE 0 END), 0) AS completed_count
+        FROM tasks
+        WHERE user_id = :uid
+    ");
+    $taskCountsStmt->execute([':uid' => $userId]);
+    $taskCounts = $taskCountsStmt->fetch(PDO::FETCH_ASSOC);
+    $pendingTaskCount = (int)($taskCounts['pending_count'] ?? 0);
+    $completedTaskCount = (int)($taskCounts['completed_count'] ?? 0);
 
-    $completedStmt = $conn->prepare("SELECT COUNT(*) FROM tasks WHERE user_id = :uid AND is_completed = 1");
-    $completedStmt->execute([':uid' => $userId]);
-    $completedTaskCount = (int)$completedStmt->fetchColumn();
-
-    // 5. Top 3 priority tasks
     $tasksStmt = $conn->prepare("
         SELECT id, user_id, title, description, category, priority, due_date, is_completed
         FROM tasks
@@ -69,7 +60,6 @@ try {
         ];
     }, $tasksStmt->fetchAll());
 
-    // 6. Habits & today's status
     $habitsStmt = $conn->prepare("
         SELECT h.id, h.user_id, h.title, h.icon, h.frequency, h.streak_count,
                CASE WHEN l.id IS NOT NULL THEN 1 ELSE 0 END AS is_completed_today
@@ -91,29 +81,30 @@ try {
         ];
     }, $habitsStmt->fetchAll());
 
-    // 7. Calculate focus streak (consecutive days with focus sessions)
     $streakStmt = $conn->prepare("
         SELECT COUNT(DISTINCT DATE(created_at))
         FROM focus_sessions
-        WHERE user_id = :uid AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+        WHERE user_id = :uid AND status = 'completed' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
     ");
     $streakStmt->execute([':uid' => $userId]);
-    $streakDays = max(1, (int)$streakStmt->fetchColumn());
+    $streakDays = (int)$streakStmt->fetchColumn();
 
-    // 8. Longest streak, total habits completed, total focus minutes for streak modal
-    $longestStreakStmt = $conn->prepare("SELECT COALESCE(MAX(streak_count), 0) FROM habits WHERE user_id = :uid");
-    $longestStreakStmt->execute([':uid' => $userId]);
-    $longestStreak = max($streakDays, (int)$longestStreakStmt->fetchColumn());
+    $longestStreak = max(1, $streakDays);
+    foreach ($habits as $h) {
+        if ($h['streak_count'] > $longestStreak) {
+            $longestStreak = $h['streak_count'];
+        }
+    }
 
-    $habitsCompletedStmt = $conn->prepare("SELECT COUNT(*) FROM habit_logs WHERE user_id = :uid");
-    $habitsCompletedStmt->execute([':uid' => $userId]);
-    $totalHabitsCompleted = (int)$habitsCompletedStmt->fetchColumn();
+    $totHabitsStmt = $conn->prepare("SELECT COUNT(*) FROM habit_logs WHERE user_id = :uid");
+    $totHabitsStmt->execute([':uid' => $userId]);
+    $totalHabitsCompleted = (int)$totHabitsStmt->fetchColumn();
 
-    $totalFocusStmt = $conn->prepare("SELECT COALESCE(SUM(duration_minutes), 0) FROM focus_sessions WHERE user_id = :uid");
-    $totalFocusStmt->execute([':uid' => $userId]);
-    $totalFocusMinutes = (int)$totalFocusStmt->fetchColumn();
+    $totFocusStmt = $conn->prepare("SELECT COALESCE(SUM(duration_minutes), 0) FROM focus_sessions WHERE user_id = :uid AND status = 'completed'");
+    $totFocusStmt->execute([':uid' => $userId]);
+    $totalFocusMinutes = (int)$totFocusStmt->fetchColumn();
 
-    echo json_encode([
+    sendJson([
         "status" => true,
         "data" => [
             "user_name" => $userName,
@@ -122,7 +113,7 @@ try {
             "focus_goal_minutes" => $goalMinutes,
             "pending_task_count" => $pendingTaskCount,
             "completed_task_count" => $completedTaskCount,
-            "streak_days" => $streakDays,
+            "streak_days" => max(1, $streakDays),
             "longest_streak" => $longestStreak,
             "total_habits_completed" => $totalHabitsCompleted,
             "total_focus_minutes" => $totalFocusMinutes,
@@ -131,6 +122,8 @@ try {
         ]
     ]);
 } catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["status" => false, "message" => "Database error: " . $e->getMessage()]);
+    sendJson([
+        "status" => false,
+        "message" => "Database error: " . $e->getMessage()
+    ], 500);
 }

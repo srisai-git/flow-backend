@@ -99,11 +99,10 @@ try {
         ':end'   => $completedAt
     ]);
 
-    // Calculate today's total focus minutes
     $sumStmt = $conn->prepare("
         SELECT COALESCE(SUM(duration_minutes), 0)
         FROM focus_sessions
-        WHERE user_id = :uid AND DATE(created_at) = CURDATE()
+        WHERE user_id = :uid AND created_at >= CURDATE() AND status = 'completed'
     ");
     $sumStmt->execute([':uid' => $userId]);
     $todayTotalMinutes = (int)$sumStmt->fetchColumn();

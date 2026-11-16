@@ -3,14 +3,14 @@
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/migrations.php';
 
-$migrationFlag = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow_migrated_v3';
-if (!file_exists($migrationFlag)) {
-    try {
-        runAllMigrations($conn);
-        @touch($migrationFlag);
-    } catch (PDOException $e) {
-        error_log("Profile Migration Notice: " . $e->getMessage());
-    }
+try {
+    runAllMigrations($conn);
+} catch (PDOException $e) {
+    error_log("Profile Migration Notice: " . $e->getMessage());
+}
+
+if (php_sapi_name() !== 'cli') {
+    header("Cache-Control: private, max-age=5");
 }
 
 $input = getJsonInput();
@@ -43,11 +43,10 @@ try {
         ];
     }
 
-    // 2. Aggregate total focus minutes across all sessions
     $focusStmt = $conn->prepare("
         SELECT COALESCE(SUM(duration_minutes), 0)
         FROM focus_sessions
-        WHERE user_id = :uid
+        WHERE user_id = :uid AND status = 'completed'
     ");
     $focusStmt->execute([':uid' => $userId]);
     $totalMinutes = (int)$focusStmt->fetchColumn();

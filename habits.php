@@ -1,49 +1,22 @@
 <?php
-// habits.php
 require_once __DIR__ . '/config/db.php';
+require_once __DIR__ . '/config/migrations.php';
 
-// Ensure tables exist
 try {
-    $conn->exec("
-        CREATE TABLE IF NOT EXISTS `habits` (
-            `id` int(11) NOT NULL AUTO_INCREMENT,
-            `user_id` int(11) NOT NULL,
-            `title` varchar(255) NOT NULL,
-            `icon` varchar(50) NOT NULL DEFAULT 'bolt',
-            `frequency` varchar(50) NOT NULL DEFAULT 'daily',
-            `streak_count` int(11) NOT NULL DEFAULT 0,
-            `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-            PRIMARY KEY (`id`),
-            KEY `idx_habits_user` (`user_id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    runAllMigrations($conn);
+} catch (PDOException $e) {}
 
-        CREATE TABLE IF NOT EXISTS `habit_logs` (
-            `id` int(11) NOT NULL AUTO_INCREMENT,
-            `habit_id` int(11) NOT NULL,
-            `user_id` int(11) NOT NULL,
-            `completed_date` date NOT NULL,
-            `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
-            PRIMARY KEY (`id`),
-            UNIQUE KEY `uniq_habit_date` (`habit_id`, `completed_date`),
-            KEY `idx_habit_logs_user` (`user_id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ");
-} catch (PDOException $e) {
-    error_log("Habits migration error: " . $e->getMessage());
-}
-
-$method = $_SERVER['REQUEST_METHOD'];
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $json = getJsonInput();
 $input = !empty($json) ? $json : $_REQUEST;
 
 $userId = $input['user_id'] ?? $_GET['user_id'] ?? null;
 if (empty($userId) || !is_numeric($userId)) {
-    $userId = 1; // Default fallback user
+    $userId = 1;
 }
 $userId = (int)$userId;
 
 if ($method === 'GET') {
-    // 1. Fetch habits joined with today's log status
     $stmt = $conn->prepare("
         SELECT h.id, h.user_id, h.title, h.icon, h.frequency, h.streak_count,
                CASE WHEN l.id IS NOT NULL THEN 1 ELSE 0 END AS is_completed_today
@@ -55,19 +28,26 @@ if ($method === 'GET') {
     $stmt->execute([':uid' => $userId]);
     $habits = $stmt->fetchAll();
 
-    // 2. Compute per-habit statistics (longest streak, total completions)
+    $allLogsStmt = $conn->prepare("
+        SELECT habit_id, completed_date 
+        FROM habit_logs 
+        WHERE user_id = :uid 
+        ORDER BY habit_id ASC, completed_date ASC
+    ");
+    $allLogsStmt->execute([':uid' => $userId]);
+    $logsByHabit = [];
+    $userDatesSet = [];
+    while ($row = $allLogsStmt->fetch(PDO::FETCH_ASSOC)) {
+        $hid = (int)$row['habit_id'];
+        $cdate = $row['completed_date'];
+        $logsByHabit[$hid][] = $cdate;
+        $userDatesSet[$cdate] = true;
+    }
+
     $habitsResult = [];
     foreach ($habits as $h) {
         $habitId = (int)$h['id'];
-
-        $logDatesStmt = $conn->prepare("
-            SELECT DISTINCT completed_date 
-            FROM habit_logs 
-            WHERE habit_id = :hid 
-            ORDER BY completed_date ASC
-        ");
-        $logDatesStmt->execute([':hid' => $habitId]);
-        $dates = $logDatesStmt->fetchAll(PDO::FETCH_COLUMN, 0);
+        $dates = $logsByHabit[$habitId] ?? [];
 
         $longest = 0;
         $curRun = 0;
@@ -100,21 +80,21 @@ if ($method === 'GET') {
         ];
     }
 
-    // 3. Compute Real Overall User Statistics
-    // Total habits completed by user
-    $totStmt = $conn->prepare("SELECT COUNT(*) FROM habit_logs WHERE user_id = :uid");
-    $totStmt->execute([':uid' => $userId]);
-    $totalHabitsCompleted = (int)$totStmt->fetchColumn();
+    $totalHabitsCompleted = 0;
+    foreach ($logsByHabit as $habitLogs) {
+        $totalHabitsCompleted += count($habitLogs);
+    }
 
-    // Total focus minutes from real completed focus sessions
-    $focusStmt = $conn->prepare("SELECT COALESCE(SUM(duration_minutes), 0) FROM focus_sessions WHERE user_id = :uid AND status = 'completed'");
+    $focusStmt = $conn->prepare("
+        SELECT COALESCE(SUM(duration_minutes), 0) 
+        FROM focus_sessions 
+        WHERE user_id = :uid AND status = 'completed'
+    ");
     $focusStmt->execute([':uid' => $userId]);
     $totalFocusMinutes = (int)$focusStmt->fetchColumn();
 
-    // Consecutive active habit streak days (days with at least 1 habit completed)
-    $userDatesStmt = $conn->prepare("SELECT DISTINCT completed_date FROM habit_logs WHERE user_id = :uid ORDER BY completed_date DESC");
-    $userDatesStmt->execute([':uid' => $userId]);
-    $userDates = $userDatesStmt->fetchAll(PDO::FETCH_COLUMN, 0);
+    $userDates = array_keys($userDatesSet);
+    rsort($userDates);
 
     $userDateLookup = array_flip($userDates);
     $today = date('Y-m-d');
@@ -140,7 +120,6 @@ if ($method === 'GET') {
         }
     }
 
-    // Longest user habit streak
     $userDatesAsc = array_reverse($userDates);
     $userLongestStreak = 0;
     $uRun = 0;
@@ -159,17 +138,22 @@ if ($method === 'GET') {
     }
     $userLongestStreak = max($userLongestStreak, $userCurrentStreak);
 
-    // 4. Real Weekly Chart Data (7 Days: 6 days ago up to today)
     $totalHabitsCount = count($habits);
+    $sevenDaysAgo = date('Y-m-d', strtotime('-6 days'));
+    $weeklyStmt = $conn->prepare("
+        SELECT completed_date, COUNT(DISTINCT habit_id) as cnt
+        FROM habit_logs
+        WHERE user_id = :uid AND completed_date >= :startDate
+        GROUP BY completed_date
+    ");
+    $weeklyStmt->execute([':uid' => $userId, ':startDate' => $sevenDaysAgo]);
+    $weeklyMap = $weeklyStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+
     $weeklyChartData = [];
     for ($i = 6; $i >= 0; $i--) {
         $dateStr = date('Y-m-d', strtotime("-$i days"));
         $dayName = date('D', strtotime("-$i days"));
-
-        $dayStmt = $conn->prepare("SELECT COUNT(DISTINCT habit_id) FROM habit_logs WHERE user_id = :uid AND completed_date = :cdate");
-        $dayStmt->execute([':uid' => $userId, ':cdate' => $dateStr]);
-        $doneCount = (int)$dayStmt->fetchColumn();
-
+        $doneCount = (int)($weeklyMap[$dateStr] ?? 0);
         $rate = ($totalHabitsCount > 0) ? round($doneCount / $totalHabitsCount, 3) : 0.0;
         $weeklyChartData[] = [
             "date" => $dateStr,
@@ -180,133 +164,159 @@ if ($method === 'GET') {
         ];
     }
 
-    // 5. Real 4-Week Consistency Data
+    $twentyEightDaysAgo = date('Y-m-d', strtotime('-27 days'));
+    $monthlyStmt = $conn->prepare("
+        SELECT completed_date, COUNT(*) as cnt
+        FROM habit_logs
+        WHERE user_id = :uid AND completed_date >= :startDate
+        GROUP BY completed_date
+    ");
+    $monthlyStmt->execute([':uid' => $userId, ':startDate' => $twentyEightDaysAgo]);
+    $monthlyDayMap = $monthlyStmt->fetchAll(PDO::FETCH_KEY_PAIR);
+
     $monthlyChartData = [];
     for ($w = 3; $w >= 0; $w--) {
-        $startDayOffset = ($w * 7) + 6;
-        $endDayOffset = $w * 7;
-        $startDate = date('Y-m-d', strtotime("-$startDayOffset days"));
-        $endDate = date('Y-m-d', strtotime("-$endDayOffset days"));
         $weekIndex = 4 - $w;
-
-        $wStmt = $conn->prepare("SELECT COUNT(*) FROM habit_logs WHERE user_id = :uid AND completed_date BETWEEN :sdate AND :edate");
-        $wStmt->execute([':uid' => $userId, ':sdate' => $startDate, ':edate' => $endDate]);
-        $wCompleted = (int)$wStmt->fetchColumn();
-
+        $wCompleted = 0;
+        for ($d = 0; $d < 7; $d++) {
+            $dayOffset = ($w * 7) + $d;
+            $dayStr = date('Y-m-d', strtotime("-$dayOffset days"));
+            $wCompleted += (int)($monthlyDayMap[$dayStr] ?? 0);
+        }
         $expected = $totalHabitsCount * 7;
         $wRate = ($expected > 0) ? round(min(1.0, $wCompleted / $expected), 3) : 0.0;
         $monthlyChartData[] = [
             "week_label" => "Week $weekIndex",
             "completed_count" => $wCompleted,
+            "total_expected" => $expected,
             "completion_rate" => (float)$wRate
         ];
     }
 
-    $sumRates = array_sum(array_column($weeklyChartData, 'completion_rate'));
-    $avgConsistency = count($weeklyChartData) > 0 ? round(($sumRates / count($weeklyChartData)) * 100, 1) : 0.0;
+    $avgConsistency = 0.0;
+    if (!empty($weeklyChartData)) {
+        $sum = 0.0;
+        foreach ($weeklyChartData as $wd) {
+            $sum += $wd['completion_rate'];
+        }
+        $avgConsistency = round(($sum / count($weeklyChartData)) * 100.0, 1);
+    }
 
-    echo json_encode([
+    sendJson([
         "status" => true,
         "data" => $habitsResult,
         "user_stats" => [
-            "current_streak" => $userCurrentStreak,
-            "longest_streak" => $userLongestStreak,
             "total_habits_completed" => $totalHabitsCompleted,
             "total_focus_minutes" => $totalFocusMinutes,
-            "avg_consistency_percent" => $avgConsistency,
+            "current_streak_days" => $userCurrentStreak,
+            "longest_streak_days" => $userLongestStreak,
+            "avg_consistency_percent" => (float)$avgConsistency,
             "weekly_chart_data" => $weeklyChartData,
             "monthly_chart_data" => $monthlyChartData
         ]
     ]);
-    exit;
 }
 
 if ($method === 'POST') {
-    $action = strtolower($input['action'] ?? 'create');
+    $action = strtolower($input['action'] ?? 'toggle');
 
-    if ($action === 'toggle') {
-        $habitId = (int)($input['habit_id'] ?? $input['id'] ?? 0);
-        if ($habitId <= 0) {
-            http_response_code(400);
-            echo json_encode(["status" => false, "message" => "Valid habit_id is required."]);
-            exit;
+    if ($action === 'create') {
+        $title = trim($input['title'] ?? '');
+        $icon = trim($input['icon'] ?? 'bolt');
+        $frequency = trim($input['frequency'] ?? 'daily');
+
+        if (empty($title)) {
+            sendJson(["status" => false, "message" => "Title is required."], 400);
         }
 
-        // Check if logged today
-        $checkStmt = $conn->prepare("SELECT id FROM habit_logs WHERE habit_id = :hid AND completed_date = CURDATE()");
-        $checkStmt->execute([':hid' => $habitId]);
-        $existingLog = $checkStmt->fetch();
-
-        if ($existingLog) {
-            // Untoggle
-            $conn->prepare("DELETE FROM habit_logs WHERE id = :lid")->execute([':lid' => $existingLog['id']]);
-            $conn->prepare("UPDATE habits SET streak_count = GREATEST(0, streak_count - 1) WHERE id = :hid")->execute([':hid' => $habitId]);
-            $isCompleted = false;
-        } else {
-            // Mark completed
-            $conn->prepare("INSERT INTO habit_logs (habit_id, user_id, completed_date) VALUES (:hid, :uid, CURDATE())")
-                 ->execute([':hid' => $habitId, ':uid' => $userId]);
-            $conn->prepare("UPDATE habits SET streak_count = streak_count + 1 WHERE id = :hid")->execute([':hid' => $habitId]);
-            $isCompleted = true;
-        }
-
-        // Get updated habit
-        $hStmt = $conn->prepare("SELECT streak_count FROM habits WHERE id = :hid");
-        $hStmt->execute([':hid' => $habitId]);
-        $streak = (int)$hStmt->fetchColumn();
-
-        echo json_encode([
-            "status" => true,
-            "message" => $isCompleted ? "Habit completed!" : "Habit unchecked.",
-            "is_completed_today" => $isCompleted,
-            "streak_count" => $streak
+        $stmt = $conn->prepare("INSERT INTO habits (user_id, title, icon, frequency, streak_count) VALUES (:uid, :title, :icon, :freq, 0)");
+        $stmt->execute([
+            ':uid' => $userId,
+            ':title' => $title,
+            ':icon' => $icon,
+            ':freq' => $frequency
         ]);
-        exit;
+
+        $newId = (int)$conn->lastInsertId();
+        sendJson([
+            "status" => true,
+            "message" => "Habit created successfully.",
+            "data" => [
+                "id" => $newId,
+                "user_id" => $userId,
+                "title" => $title,
+                "icon" => $icon,
+                "frequency" => $frequency,
+                "streak_count" => 0,
+                "longest_streak" => 0,
+                "total_completions" => 0,
+                "is_completed_today" => false
+            ]
+        ]);
     }
 
     if ($action === 'delete') {
         $habitId = (int)($input['habit_id'] ?? $input['id'] ?? 0);
-        $conn->prepare("DELETE FROM habit_logs WHERE habit_id = :hid")->execute([':hid' => $habitId]);
-        $conn->prepare("DELETE FROM habits WHERE id = :hid AND user_id = :uid")->execute([':hid' => $habitId, ':uid' => $userId]);
-        echo json_encode(["status" => true, "message" => "Habit deleted."]);
-        exit;
+        if ($habitId <= 0) {
+            sendJson(["status" => false, "message" => "Valid habit_id is required."], 400);
+        }
+
+        $stmt = $conn->prepare("DELETE FROM habits WHERE id = :id AND user_id = :uid");
+        $stmt->execute([':id' => $habitId, ':uid' => $userId]);
+
+        $stmtLog = $conn->prepare("DELETE FROM habit_logs WHERE habit_id = :hid AND user_id = :uid");
+        $stmtLog->execute([':hid' => $habitId, ':uid' => $userId]);
+
+        sendJson([
+            "status" => true,
+            "message" => "Habit deleted successfully."
+        ]);
     }
 
-    // Default: Create Habit
-    $title = trim($input['title'] ?? '');
-    $icon = trim($input['icon'] ?? 'bolt');
-    $frequency = trim($input['frequency'] ?? 'daily');
-
-    if (empty($title)) {
-        http_response_code(400);
-        echo json_encode(["status" => false, "message" => "Title is required."]);
-        exit;
+    $habitId = (int)($input['habit_id'] ?? $input['id'] ?? 0);
+    if ($habitId <= 0) {
+        sendJson(["status" => false, "message" => "Valid habit_id is required."], 400);
     }
 
-    $stmt = $conn->prepare("INSERT INTO habits (user_id, title, icon, frequency, streak_count) VALUES (:uid, :title, :icon, :freq, 0)");
-    $stmt->execute([
-        ':uid' => $userId,
-        ':title' => $title,
-        ':icon' => $icon,
-        ':freq' => $frequency
-    ]);
+    $today = date('Y-m-d');
+    $checkStmt = $conn->prepare("SELECT id FROM habit_logs WHERE habit_id = :hid AND completed_date = :cdate LIMIT 1");
+    $checkStmt->execute([':hid' => $habitId, ':cdate' => $today]);
+    $existing = $checkStmt->fetch();
 
-    $newId = (int)$conn->lastInsertId();
-    echo json_encode([
-        "status" => true,
-        "message" => "Habit created successfully.",
-        "data" => [
-            "id" => $newId,
-            "user_id" => $userId,
-            "title" => $title,
-            "icon" => $icon,
-            "frequency" => $frequency,
-            "streak_count" => 0,
-            "longest_streak" => 0,
-            "total_completions" => 0,
-            "is_completed_today" => false
-        ]
-    ]);
-    exit;
+    $newStreak = 0;
+    if ($existing) {
+        $delStmt = $conn->prepare("DELETE FROM habit_logs WHERE id = :id");
+        $delStmt->execute([':id' => $existing['id']]);
+
+        $upStmt = $conn->prepare("UPDATE habits SET streak_count = GREATEST(0, streak_count - 1) WHERE id = :id");
+        $upStmt->execute([':id' => $habitId]);
+
+        $sStmt = $conn->prepare("SELECT streak_count FROM habits WHERE id = :id");
+        $sStmt->execute([':id' => $habitId]);
+        $newStreak = (int)$sStmt->fetchColumn();
+
+        sendJson([
+            "status" => true,
+            "is_completed" => false,
+            "streak_count" => $newStreak,
+            "message" => "Habit marked as incomplete."
+        ]);
+    } else {
+        $insStmt = $conn->prepare("INSERT INTO habit_logs (habit_id, user_id, completed_date) VALUES (:hid, :uid, :cdate)");
+        $insStmt->execute([':hid' => $habitId, ':uid' => $userId, ':cdate' => $today]);
+
+        $upStmt = $conn->prepare("UPDATE habits SET streak_count = streak_count + 1 WHERE id = :id");
+        $upStmt->execute([':id' => $habitId]);
+
+        $sStmt = $conn->prepare("SELECT streak_count FROM habits WHERE id = :id");
+        $sStmt->execute([':id' => $habitId]);
+        $newStreak = (int)$sStmt->fetchColumn();
+
+        sendJson([
+            "status" => true,
+            "is_completed" => true,
+            "streak_count" => $newStreak,
+            "message" => "Habit marked as complete!"
+        ]);
+    }
 }
-?>
