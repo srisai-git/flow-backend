@@ -33,3 +33,4 @@ try {
     echo "  [FAIL] " . $e->getMessage() . PHP_EOL;
     exit(1);
 }
+

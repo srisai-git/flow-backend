@@ -57,3 +57,4 @@ try {
         "message" => "Failed to log distraction: " . $e->getMessage()
     ]);
 }
+

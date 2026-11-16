@@ -4,3 +4,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 } else {
     require __DIR__ . '/get_distractions.php';
 }
+
