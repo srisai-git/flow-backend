@@ -76,15 +76,22 @@ class ChatCompletionRequest(BaseModel):
 class SimpleChatRequest(BaseModel):
     message: Optional[str] = None
     prompt: Optional[str] = None
+    query: Optional[str] = None
+    text: Optional[str] = None
 
-def build_prompt_from_messages(messages: List[Message]) -> str:
-    has_system = any(m.role == "system" for m in messages)
+def build_prompt_from_messages(messages: List[Union[Message, dict]]) -> str:
+    has_system = any(
+        (m.role == "system" if isinstance(m, Message) else m.get("role") == "system")
+        for m in messages
+    )
     parts = []
     if not has_system:
         parts.append(f"<|im_start|>system\n{SYSTEM_PERSONA}<|im_end|>")
     
     for m in messages:
-        parts.append(f"<|im_start|>{m.role}\n{m.content}<|im_end|>")
+        role = m.role if isinstance(m, Message) else m.get("role", "user")
+        content = m.content if isinstance(m, Message) else m.get("content", "")
+        parts.append(f"<|im_start|>{role}\n{content}<|im_end|>")
     
     parts.append("<|im_start|>assistant\n")
     return "\n".join(parts)
@@ -143,6 +150,7 @@ def chat_completions(req: ChatCompletionRequest):
                     "finish_reason": "stop"
                 }
             ],
+            "response": PHYSICAL_DECLINE_MESSAGE,
             "reply": PHYSICAL_DECLINE_MESSAGE,
             "insight": PHYSICAL_DECLINE_MESSAGE,
             "success": True
@@ -163,6 +171,7 @@ def chat_completions(req: ChatCompletionRequest):
                     "finish_reason": "stop"
                 }
             ],
+            "response": DECLINE_MESSAGE,
             "reply": DECLINE_MESSAGE,
             "insight": DECLINE_MESSAGE,
             "success": True
@@ -198,6 +207,7 @@ def chat_completions(req: ChatCompletionRequest):
                 "finish_reason": "stop"
             }
         ],
+        "response": reply,
         "reply": reply,
         "insight": reply,
         "success": True
@@ -205,30 +215,62 @@ def chat_completions(req: ChatCompletionRequest):
 
 @app.post("/ask_groot")
 def ask_groot(req: SimpleChatRequest):
-    user_msg = req.message or req.prompt or "Hello Groot."
+    user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
+    if PHYSICAL_ACTION_RE.search(user_msg):
+        return {"success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE}
     if OFF_TOPIC_RE.search(user_msg):
-        return {"success": True, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE}
+        return {"success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE}
     messages = [
         Message(role="system", content=SYSTEM_PERSONA),
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
     reply = generate_response(prompt_text, max_tokens=400, temperature=0.3)
-    return {"success": True, "reply": reply, "insight": reply}
+    return {"success": True, "response": reply, "reply": reply, "insight": reply}
+
+@app.post("/predict")
+def predict(req: SimpleChatRequest):
+    user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
+    if PHYSICAL_ACTION_RE.search(user_msg):
+        return {
+            "success": True,
+            "response": PHYSICAL_DECLINE_MESSAGE,
+            "reply": PHYSICAL_DECLINE_MESSAGE,
+            "insight": PHYSICAL_DECLINE_MESSAGE
+        }
+    if OFF_TOPIC_RE.search(user_msg):
+        return {
+            "success": True,
+            "response": DECLINE_MESSAGE,
+            "reply": DECLINE_MESSAGE,
+            "insight": DECLINE_MESSAGE
+        }
+    messages = [
+        Message(role="system", content=SYSTEM_PERSONA),
+        Message(role="user", content=user_msg)
+    ]
+    prompt_text = build_prompt_from_messages(messages)
+    reply = generate_response(prompt_text, max_tokens=400, temperature=0.3)
+    return {
+        "success": True,
+        "response": reply,
+        "reply": reply,
+        "insight": reply
+    }
 
 @app.post("/generate")
 def generate(req: dict):
-    user_msg = req.get("prompt") or req.get("message") or ""
+    user_msg = req.get("prompt") or req.get("message") or req.get("query") or ""
     if user_msg and PHYSICAL_ACTION_RE.search(user_msg):
-        return {"reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "success": True}
+        return {"response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "success": True}
     if user_msg and OFF_TOPIC_RE.search(user_msg):
-        return {"reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "success": True}
+        return {"response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "success": True}
 
     if "messages" in req and isinstance(req["messages"], list):
-        msg_objs = [Message(**m) for m in req["messages"]]
+        msg_objs = [Message(**m) if isinstance(m, dict) else m for m in req["messages"]]
         prompt_text = build_prompt_from_messages(msg_objs)
     else:
-        user_msg = req.get("prompt") or req.get("message") or "Hello Groot."
+        user_msg = req.get("prompt") or req.get("message") or req.get("query") or "Hello Groot."
         messages = [
             Message(role="system", content=SYSTEM_PERSONA),
             Message(role="user", content=user_msg)
@@ -236,7 +278,7 @@ def generate(req: dict):
         prompt_text = build_prompt_from_messages(messages)
     
     reply = generate_response(prompt_text, max_tokens=350, temperature=0.5)
-    return {"reply": reply, "insight": reply, "success": True}
+    return {"response": reply, "reply": reply, "insight": reply, "success": True}
 
 if __name__ == "__main__":
     import uvicorn
