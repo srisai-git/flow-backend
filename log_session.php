@@ -16,7 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
     try {
         $stmt = $conn->prepare("
-            SELECT s.id, s.user_id, s.task_id, s.duration_minutes, s.session_type, s.status, s.started_at, s.completed_at, s.created_at,
+            SELECT s.id, s.user_id, s.task_id, s.duration_minutes, s.session_type, s.tag, s.status, s.started_at, s.completed_at, s.created_at,
                    t.title AS task_title, t.category AS task_category
             FROM focus_sessions s
             LEFT JOIN tasks t ON s.task_id = t.id
@@ -38,6 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                     "task_id" => $s['task_id'] !== null ? (int)$s['task_id'] : null,
                     "duration_minutes" => (int)$s['duration_minutes'],
                     "session_type" => $s['session_type'] ?: 'pomodoro',
+                    "tag" => $s['tag'] ?: 'General',
                     "status" => $s['status'] ?: 'completed',
                     "started_at" => $s['started_at'] ?: $s['created_at'],
                     "completed_at" => $s['completed_at'] ?: $s['created_at'],
@@ -67,6 +68,7 @@ $userId          = (int)($input['user_id'] ?? 1);
 $durationMinutes = (int)($input['duration_minutes'] ?? 25);
 $sessionType     = trim($input['session_type'] ?? 'pomodoro');
 $taskId          = !empty($input['task_id']) ? (int)$input['task_id'] : null;
+$tag             = !empty($input['tag']) ? trim($input['tag']) : (!empty($input['task_category']) ? trim($input['task_category']) : 'General');
 $status          = !empty($input['status']) && in_array(trim($input['status']), ['completed', 'abandoned']) ? trim($input['status']) : 'completed';
 
 if ($durationMinutes <= 0 && isset($input['duration_seconds'])) {
@@ -86,14 +88,15 @@ if (!empty($input['started_at'])) {
 
 try {
     $stmt = $conn->prepare("
-        INSERT INTO focus_sessions (user_id, task_id, duration_minutes, session_type, status, started_at, completed_at, created_at)
-        VALUES (:uid, :tid, :dur, :type, :stat, :start, :end, NOW())
+        INSERT INTO focus_sessions (user_id, task_id, duration_minutes, session_type, tag, status, started_at, completed_at, created_at)
+        VALUES (:uid, :tid, :dur, :type, :tag, :stat, :start, :end, NOW())
     ");
     $stmt->execute([
         ':uid'   => $userId,
         ':tid'   => $taskId,
         ':dur'   => $durationMinutes,
         ':type'  => $sessionType,
+        ':tag'   => $tag,
         ':stat'  => $status,
         ':start' => $startedAt,
         ':end'   => $completedAt

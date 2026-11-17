@@ -19,6 +19,12 @@ function runAllMigrations(PDO $conn, bool $force = false): array {
     try {
         $conn->exec("ALTER TABLE `users` ADD COLUMN `avatar_url` VARCHAR(512) DEFAULT NULL");
     } catch (PDOException $e) {}
+    try {
+        $conn->exec("ALTER TABLE `focus_sessions` ADD COLUMN `tag` VARCHAR(100) DEFAULT 'General'");
+    } catch (PDOException $e) {}
+    try {
+        $conn->exec("ALTER TABLE `tasks` ADD COLUMN `scheduled_time` VARCHAR(20) DEFAULT NULL");
+    } catch (PDOException $e) {}
 
     $conn->exec("
         CREATE TABLE IF NOT EXISTS `user_preferences` (

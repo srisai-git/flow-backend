@@ -19,7 +19,7 @@ $userId = (int)$userId;
 if ($method === 'GET') {
     // Return all tasks for the user without fake seeders
     $stmt = $conn->prepare("
-        SELECT id, user_id, title, description, category, priority, due_date, is_completed, created_at
+        SELECT id, user_id, title, description, category, priority, due_date, scheduled_time, is_completed, created_at
         FROM tasks
         WHERE user_id = :uid
         ORDER BY is_completed ASC, FIELD(priority, 'high', 'medium', 'low'), id DESC
@@ -38,6 +38,7 @@ if ($method === 'GET') {
                 "category" => $t['category'] ?: 'General',
                 "priority" => $t['priority'] ?: 'medium',
                 "due_date" => $t['due_date'] ?: date('Y-m-d'),
+                "scheduled_time" => $t['scheduled_time'] ?: null,
                 "is_completed" => (bool)$t['is_completed'],
                 "created_at" => $t['created_at']
             ];
@@ -93,6 +94,7 @@ if ($method === 'POST') {
     $priority = strtolower(trim($input['priority'] ?? 'medium'));
     if (!in_array($priority, ['low', 'medium', 'high'])) $priority = 'medium';
     $dueDate = trim($input['due_date'] ?? date('Y-m-d'));
+    $scheduledTime = !empty($input['scheduled_time']) ? trim($input['scheduled_time']) : null;
     $category = trim($input['category'] ?? 'General');
 
     if (empty($title)) {
@@ -102,8 +104,8 @@ if ($method === 'POST') {
     }
 
     $stmt = $conn->prepare("
-        INSERT INTO tasks (user_id, title, description, category, priority, due_date, is_completed)
-        VALUES (:uid, :title, :desc, :cat, :pri, :due, 0)
+        INSERT INTO tasks (user_id, title, description, category, priority, due_date, scheduled_time, is_completed)
+        VALUES (:uid, :title, :desc, :cat, :pri, :due, :stime, 0)
     ");
     $stmt->execute([
         ':uid' => $userId,
@@ -111,7 +113,8 @@ if ($method === 'POST') {
         ':desc' => $description,
         ':cat' => $category,
         ':pri' => $priority,
-        ':due' => $dueDate
+        ':due' => $dueDate,
+        ':stime' => $scheduledTime
     ]);
 
     $newId = (int)$conn->lastInsertId();
@@ -127,6 +130,7 @@ if ($method === 'POST') {
             "category" => $category,
             "priority" => $priority,
             "due_date" => $dueDate,
+            "scheduled_time" => $scheduledTime,
             "is_completed" => false
         ]
     ]);

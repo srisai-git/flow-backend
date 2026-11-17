@@ -2,14 +2,48 @@ import os
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 import re
+import time
+from collections import defaultdict
 from typing import List, Optional, Union
 import torch
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
 app = FastAPI(title="Groot AI Engine")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+ip_request_history = defaultdict(list)
+MAX_REQUESTS_PER_MINUTE = 60
+RATE_WINDOW_SECONDS = 60
+
+@app.middleware("http")
+async def security_and_rate_limit_middleware(request: Request, call_next):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    now = time.time()
+    recent = [t for t in ip_request_history[client_ip] if now - t < RATE_WINDOW_SECONDS]
+    if len(recent) >= MAX_REQUESTS_PER_MINUTE:
+        return JSONResponse(
+            status_code=429,
+            content={"status": "error", "message": "Rate limit exceeded. Please try again later."}
+        )
+    recent.append(now)
+    ip_request_history[client_ip] = recent
+
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
 
 base_model_id = "Qwen/Qwen2.5-0.5B-Instruct"
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -37,7 +71,9 @@ SYSTEM_PERSONA = (
     "You are Groot, the dedicated in-app productivity and focus coaching intelligence for FocusFlow.\n\n"
     "STRICT OPERATIONAL BOUNDARIES:\n"
     "- You are a digital software assistant. You CANNOT perform biological or physical actions such as singing, eating, running, or sleeping. If asked, politely state: \"As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.\"\n"
-    "- Strictly decline pop-culture trivia, movie discussions, and non-productivity topics, steering the user back to deep work and flow state.\n\n"
+    "- Strictly decline pop-culture trivia, movie discussions, and non-productivity topics, steering the user back to deep work and flow state.\n"
+    "- STRICT ENGLISH-ONLY ENFORCEMENT: You must process and respond strictly and exclusively in English. If the user writes in any other language, refuse strictly in English with: \"I can only process and respond to commands in English. Please enter your request in English.\"\n"
+    "- STRICT LOGICAL ACCURACY & ZERO HALLUCINATION: Reason step-by-step logically based strictly on verified user context and facts. If a request is ambiguous, lacks data, or cannot be answered accurately, explicitly state what is missing or unknown instead of guessing or fabricating wrong answers.\n\n"
     "CORE CAPABILITIES:\n"
     "- Focus Coaching: Analyze focus minutes, session streaks, and distraction patterns to provide data-driven recommendations.\n"
     "- Study & Work Plans: Generate structured, actionable, time-blocked study schedules with clear objectives and milestones.\n"
@@ -49,28 +85,40 @@ DEFAULT_SYSTEM_PROMPT = SYSTEM_PERSONA
 
 DECLINE_MESSAGE = "I am dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?"
 PHYSICAL_DECLINE_MESSAGE = "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits."
+ENGLISH_REFUSAL_MESSAGE = "I can only process and respond to commands in English. Please enter your request in English."
 
 OFF_TOPIC_RE = re.compile(r'(?i)\b(rajini|rajinikanth|actor|actress|movie|cinema|film|celebrity|hero|director|cricket|football|fifa|ipl|messi|ronaldo|politician|politics|president|minister|song|bollywood|hollywood|kollywood|tollywood)\b')
 PHYSICAL_ACTION_RE = re.compile(r'(?i)\b(sing|singing|song|eat|eating|food|sleep|sleeping|sleepy|run|running|dance|dancing|walk|walking|cook|cooking|drink|drinking)\b')
+NON_ENGLISH_SCRIPT_RE = re.compile(r'[\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]')
+NON_ENGLISH_WORDS_RE = re.compile(r'(?i)\b(namaste|kaise|vanakkam|bonjour|hola|merci|danke|ciao|como\s+estas|comment\s+allez|que\s+tal|kya\s+haal|dhanyavad|nandri)\b')
 emoji_pattern = re.compile(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55]')
 
+def is_non_english(text: str) -> bool:
+    if not text:
+        return False
+    if NON_ENGLISH_SCRIPT_RE.search(text):
+        return True
+    if NON_ENGLISH_WORDS_RE.search(text):
+        return True
+    return False
+
 class Message(BaseModel):
-    role: str
-    content: str
+    role: str = Field(..., max_length=50)
+    content: str = Field(..., max_length=4000)
 
 class ChatCompletionRequest(BaseModel):
-    model: Optional[str] = "groot"
+    model: Optional[str] = Field("groot", max_length=100)
     messages: Optional[List[Message]] = None
-    prompt: Optional[str] = None
-    temperature: Optional[float] = 0.4
-    max_tokens: Optional[int] = 600
-    top_p: Optional[float] = 0.9
+    prompt: Optional[str] = Field(None, max_length=4000)
+    temperature: Optional[float] = Field(0.4, ge=0.0, le=2.0)
+    max_tokens: Optional[int] = Field(600, ge=1, le=2048)
+    top_p: Optional[float] = Field(0.9, ge=0.0, le=1.0)
 
 class SimpleChatRequest(BaseModel):
-    message: Optional[str] = None
-    prompt: Optional[str] = None
-    query: Optional[str] = None
-    text: Optional[str] = None
+    message: Optional[str] = Field(None, max_length=4000)
+    prompt: Optional[str] = Field(None, max_length=4000)
+    query: Optional[str] = Field(None, max_length=4000)
+    text: Optional[str] = Field(None, max_length=4000)
 
 class StudyPlanRequest(BaseModel):
     subject: Optional[str] = None
@@ -141,6 +189,17 @@ def chat_completions(req: ChatCompletionRequest):
     if not user_content and req.prompt:
         user_content = req.prompt
     
+    if user_content and is_non_english(user_content):
+        return {
+            "id": "chatcmpl-groot-language",
+            "object": "chat.completion",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": ENGLISH_REFUSAL_MESSAGE}, "finish_reason": "stop"}],
+            "response": ENGLISH_REFUSAL_MESSAGE,
+            "reply": ENGLISH_REFUSAL_MESSAGE,
+            "insight": ENGLISH_REFUSAL_MESSAGE,
+            "success": True
+        }
+
     if user_content and PHYSICAL_ACTION_RE.search(user_content):
         return {
             "id": "chatcmpl-groot-physical",
@@ -195,6 +254,8 @@ def chat_completions(req: ChatCompletionRequest):
 @app.post("/ask_groot")
 def ask_groot(req: SimpleChatRequest):
     user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
+    if is_non_english(user_msg):
+        return {"status": "success", "success": True, "response": ENGLISH_REFUSAL_MESSAGE, "reply": ENGLISH_REFUSAL_MESSAGE, "insight": ENGLISH_REFUSAL_MESSAGE, "message": ENGLISH_REFUSAL_MESSAGE}
     if PHYSICAL_ACTION_RE.search(user_msg):
         return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE}
     if OFF_TOPIC_RE.search(user_msg):
@@ -210,6 +271,8 @@ def ask_groot(req: SimpleChatRequest):
 @app.post("/predict")
 def predict(req: SimpleChatRequest):
     user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
+    if is_non_english(user_msg):
+        return {"status": "success", "success": True, "response": ENGLISH_REFUSAL_MESSAGE, "reply": ENGLISH_REFUSAL_MESSAGE, "insight": ENGLISH_REFUSAL_MESSAGE, "message": ENGLISH_REFUSAL_MESSAGE}
     if PHYSICAL_ACTION_RE.search(user_msg):
         return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE}
     if OFF_TOPIC_RE.search(user_msg):

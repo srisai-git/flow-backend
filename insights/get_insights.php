@@ -214,36 +214,48 @@ try {
     }
     $bestWindow = sprintf("%02d:00–%02d:00", $peakHour, ($peakHour + 2) % 24);
 
-    // 11. Distractions Summary (Based on logged abandoned sessions & pattern tagging)
-    $abandonedStmt = $conn->prepare("
-        SELECT COUNT(*) 
-        FROM focus_sessions 
-        WHERE user_id = :user_id AND status = 'abandoned' AND started_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 DAY)
+    // 11. Distractions Summary (Based on real logged distractions in distraction_logs)
+    $distLogStmt = $conn->prepare("
+        SELECT category, COUNT(*) as cnt
+        FROM distraction_logs
+        WHERE user_id = :user_id
+        GROUP BY category
+        ORDER BY cnt DESC
     ");
-    $abandonedStmt->execute([':user_id' => $userId]);
-    $abandonedCount = (int)$abandonedStmt->fetchColumn();
-    $effectiveSessions = max(1, $totalSessions + $abandonedCount);
-    $interruptionRate = round($abandonedCount / $effectiveSessions, 1);
+    $distLogStmt->execute([':user_id' => $userId]);
+    $loggedDistractions = $distLogStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Distraction Category breakdown
-    $distractionEvents = max($abandonedCount, 0);
-    $catSocial = (int)round($distractionEvents * 0.42);
-    $catNotif  = (int)round($distractionEvents * 0.25);
-    $catBrowse = (int)round($distractionEvents * 0.17);
-    $catPeople = (int)round($distractionEvents * 0.08);
-    $catOther  = max(0, $distractionEvents - ($catSocial + $catNotif + $catBrowse + $catPeople));
+    $totalDistractionEvents = 0;
+    foreach ($loggedDistractions as $ld) {
+        $totalDistractionEvents += (int)$ld['cnt'];
+    }
+
+    $topDistCategory = !empty($loggedDistractions) ? $loggedDistractions[0]['category'] : 'None';
+    $catBreakdown = [];
+    if ($totalDistractionEvents > 0) {
+        foreach ($loggedDistractions as $ld) {
+            $catBreakdown[] = [
+                "category" => $ld['category'],
+                "count" => (int)$ld['cnt'],
+                "percent" => (int)round(((int)$ld['cnt'] / $totalDistractionEvents) * 100)
+            ];
+        }
+    } else {
+        $catBreakdown = [
+            ["category" => "Social Media", "count" => 0, "percent" => 0],
+            ["category" => "Notifications", "count" => 0, "percent" => 0],
+            ["category" => "Other", "count" => 0, "percent" => 0]
+        ];
+    }
+
+    $effectiveSessions = max(1, $totalSessions + $totalDistractionEvents);
+    $interruptionRate = round($totalDistractionEvents / $effectiveSessions, 1);
 
     $distractionsBreakdown = [
-        "total_events" => $distractionEvents,
+        "total_events" => $totalDistractionEvents,
         "per_session_rate" => $interruptionRate,
-        "top_category" => "Social Media",
-        "categories" => [
-            ["category" => "Social Media", "count" => $catSocial, "percent" => 42],
-            ["category" => "Notifications", "count" => $catNotif, "percent" => 25],
-            ["category" => "Browsing", "count" => $catBrowse, "percent" => 17],
-            ["category" => "People", "count" => $catPeople, "percent" => 8],
-            ["category" => "Other", "count" => $catOther, "percent" => 8]
-        ]
+        "top_category" => $topDistCategory,
+        "categories" => $catBreakdown
     ];
 
     // 12. 4-Week Consistency Metrics
