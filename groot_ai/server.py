@@ -15,7 +15,6 @@ base_model_id = "Qwen/Qwen2.5-0.5B-Instruct"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 adapter_path = os.path.join(script_dir, "groot_model")
 
-print("Loading base tokenizer and model...")
 tokenizer = AutoTokenizer.from_pretrained(base_model_id)
 if tokenizer.pad_token is None:
     tokenizer.pad_token = tokenizer.eos_token
@@ -28,27 +27,23 @@ base_model = AutoModelForCausalLM.from_pretrained(
 )
 
 if os.path.exists(adapter_path):
-    print("Attaching trained Groot adapter...")
     model = PeftModel.from_pretrained(base_model, adapter_path)
 else:
-    print("Using base model directly (adapter directory not found)...")
     model = base_model
 
 model.eval()
-print("Groot AI Engine is online and ready!")
 
 SYSTEM_PERSONA = (
-    "You are Groot, the dedicated in-app productivity companion for FocusFlow.\n\n"
+    "You are Groot, the dedicated in-app productivity and focus coaching intelligence for FocusFlow.\n\n"
     "STRICT OPERATIONAL BOUNDARIES:\n"
     "- You are a digital software assistant. You CANNOT perform biological or physical actions such as singing, eating, running, or sleeping. If asked, politely state: \"As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.\"\n"
-    "- Strictly decline general pop-culture trivia, movie questions, or non-productivity queries, steering the user back to deep work and flow state.\n\n"
-    "FULL FOCUSFLOW KNOWLEDGE:\n"
-    "- Focus Timer: Deep work, Pomodoro sessions, custom durations, and break reminders.\n"
-    "- Habit Tracker: Daily streaks, habit checklists, and completion consistency.\n"
-    "- Distraction Log: Real-time Digital Wellbeing screen time tracking and usage deltas.\n"
-    "- Analytics: Daily and monthly focus minutes and session metrics.\n"
-    "- Never invent facts or hallucinate answers.\n"
-    "- Never output emojis."
+    "- Strictly decline pop-culture trivia, movie discussions, and non-productivity topics, steering the user back to deep work and flow state.\n\n"
+    "CORE CAPABILITIES:\n"
+    "- Focus Coaching: Analyze focus minutes, session streaks, and distraction patterns to provide data-driven recommendations.\n"
+    "- Study & Work Plans: Generate structured, actionable, time-blocked study schedules with clear objectives and milestones.\n"
+    "- Pomodoro & Timers: Optimize work-break intervals (25m focus, 5m break) and suggest tailored session lengths.\n"
+    "- Task Breakdown: Decompose large, ambiguous goals into 3 to 4 concrete, actionable subtasks.\n"
+    "- Format: Deliver structured, clean markdown lists with zero fluff, zero hallucination, and strictly zero emojis."
 )
 DEFAULT_SYSTEM_PROMPT = SYSTEM_PERSONA
 
@@ -57,7 +52,6 @@ PHYSICAL_DECLINE_MESSAGE = "As an AI companion inside FocusFlow, I cannot sing o
 
 OFF_TOPIC_RE = re.compile(r'(?i)\b(rajini|rajinikanth|actor|actress|movie|cinema|film|celebrity|hero|director|cricket|football|fifa|ipl|messi|ronaldo|politician|politics|president|minister|song|bollywood|hollywood|kollywood|tollywood)\b')
 PHYSICAL_ACTION_RE = re.compile(r'(?i)\b(sing|singing|song|eat|eating|food|sleep|sleeping|sleepy|run|running|dance|dancing|walk|walking|cook|cooking|drink|drinking)\b')
-
 emoji_pattern = re.compile(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55]')
 
 class Message(BaseModel):
@@ -68,7 +62,7 @@ class ChatCompletionRequest(BaseModel):
     model: Optional[str] = "groot"
     messages: Optional[List[Message]] = None
     prompt: Optional[str] = None
-    temperature: Optional[float] = 0.5
+    temperature: Optional[float] = 0.4
     max_tokens: Optional[int] = 600
     top_p: Optional[float] = 0.9
 
@@ -77,6 +71,19 @@ class SimpleChatRequest(BaseModel):
     prompt: Optional[str] = None
     query: Optional[str] = None
     text: Optional[str] = None
+
+class StudyPlanRequest(BaseModel):
+    subject: Optional[str] = None
+    topic: Optional[str] = None
+    goal: Optional[str] = None
+    daily_hours: Optional[float] = 2.0
+    days: Optional[int] = 7
+
+class FocusCoachingRequest(BaseModel):
+    focus_minutes: Optional[int] = 0
+    distractions_count: Optional[int] = 0
+    streak_days: Optional[int] = 0
+    user_query: Optional[str] = None
 
 def build_prompt_from_messages(messages: List[Union[Message, dict]]) -> str:
     has_system = any(
@@ -95,7 +102,7 @@ def build_prompt_from_messages(messages: List[Union[Message, dict]]) -> str:
     parts.append("<|im_start|>assistant\n")
     return "\n".join(parts)
 
-def generate_response(prompt_text: str, max_tokens: int = 180, temperature: float = 0.5, top_p: float = 0.9) -> str:
+def generate_response(prompt_text: str, max_tokens: int = 220, temperature: float = 0.4, top_p: float = 0.9) -> str:
     inputs = tokenizer(prompt_text, return_tensors="pt")
     if use_cuda:
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
@@ -103,10 +110,10 @@ def generate_response(prompt_text: str, max_tokens: int = 180, temperature: floa
     with torch.inference_mode():
         outputs = model.generate(
             **inputs,
-            max_new_tokens=min(max_tokens, 180),
+            max_new_tokens=min(max_tokens, 300),
             temperature=temperature,
             top_p=top_p,
-            repetition_penalty=1.1,
+            repetition_penalty=1.12,
             pad_token_id=tokenizer.eos_token_id,
             do_sample=True if temperature > 0 else False,
             early_stopping=True
@@ -119,8 +126,9 @@ def generate_response(prompt_text: str, max_tokens: int = 180, temperature: floa
     return reply
 
 @app.get("/")
+@app.get("/health")
 def health():
-    return {"status": "ok", "service": "Groot AI Engine"}
+    return {"status": "ok", "service": "Groot AI Engine", "ready": True}
 
 @app.post("/v1/chat/completions")
 def chat_completions(req: ChatCompletionRequest):
@@ -137,16 +145,7 @@ def chat_completions(req: ChatCompletionRequest):
         return {
             "id": "chatcmpl-groot-physical",
             "object": "chat.completion",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": PHYSICAL_DECLINE_MESSAGE
-                    },
-                    "finish_reason": "stop"
-                }
-            ],
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": PHYSICAL_DECLINE_MESSAGE}, "finish_reason": "stop"}],
             "response": PHYSICAL_DECLINE_MESSAGE,
             "reply": PHYSICAL_DECLINE_MESSAGE,
             "insight": PHYSICAL_DECLINE_MESSAGE,
@@ -157,16 +156,7 @@ def chat_completions(req: ChatCompletionRequest):
         return {
             "id": "chatcmpl-groot-decline",
             "object": "chat.completion",
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": DECLINE_MESSAGE
-                    },
-                    "finish_reason": "stop"
-                }
-            ],
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": DECLINE_MESSAGE}, "finish_reason": "stop"}],
             "response": DECLINE_MESSAGE,
             "reply": DECLINE_MESSAGE,
             "insight": DECLINE_MESSAGE,
@@ -184,8 +174,8 @@ def chat_completions(req: ChatCompletionRequest):
         ]
     
     prompt_text = build_prompt_from_messages(messages)
-    max_tokens = min(req.max_tokens or 180, 180)
-    temp = req.temperature if req.temperature is not None else 0.5
+    max_tokens = min(req.max_tokens or 220, 300)
+    temp = req.temperature if req.temperature is not None else 0.4
     top_p = req.top_p if req.top_p is not None else 0.9
     
     reply = generate_response(prompt_text, max_tokens=max_tokens, temperature=temp, top_p=top_p)
@@ -193,16 +183,7 @@ def chat_completions(req: ChatCompletionRequest):
     return {
         "id": "chatcmpl-groot",
         "object": "chat.completion",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": reply
-                },
-                "finish_reason": "stop"
-            }
-        ],
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": reply}, "finish_reason": "stop"}],
         "response": reply,
         "reply": reply,
         "insight": reply,
@@ -223,44 +204,23 @@ def ask_groot(req: SimpleChatRequest):
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=180, temperature=0.3)
+    reply = generate_response(prompt_text, max_tokens=220, temperature=0.3)
     return {"status": "success", "success": True, "response": reply, "reply": reply, "insight": reply, "message": reply}
 
 @app.post("/predict")
 def predict(req: SimpleChatRequest):
     user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
     if PHYSICAL_ACTION_RE.search(user_msg):
-        return {
-            "status": "success",
-            "success": True,
-            "response": PHYSICAL_DECLINE_MESSAGE,
-            "reply": PHYSICAL_DECLINE_MESSAGE,
-            "insight": PHYSICAL_DECLINE_MESSAGE,
-            "message": PHYSICAL_DECLINE_MESSAGE
-        }
+        return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE}
     if OFF_TOPIC_RE.search(user_msg):
-        return {
-            "status": "success",
-            "success": True,
-            "response": DECLINE_MESSAGE,
-            "reply": DECLINE_MESSAGE,
-            "insight": DECLINE_MESSAGE,
-            "message": DECLINE_MESSAGE
-        }
+        return {"status": "success", "success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "message": DECLINE_MESSAGE}
     messages = [
         Message(role="system", content=SYSTEM_PERSONA),
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=180, temperature=0.3)
-    return {
-        "status": "success",
-        "success": True,
-        "response": reply,
-        "reply": reply,
-        "insight": reply,
-        "message": reply
-    }
+    reply = generate_response(prompt_text, max_tokens=220, temperature=0.3)
+    return {"status": "success", "success": True, "response": reply, "reply": reply, "insight": reply, "message": reply}
 
 @app.post("/generate")
 def generate(req: dict):
@@ -281,7 +241,7 @@ def generate(req: dict):
         ]
         prompt_text = build_prompt_from_messages(messages)
     
-    reply = generate_response(prompt_text, max_tokens=180, temperature=0.5)
+    reply = generate_response(prompt_text, max_tokens=220, temperature=0.4)
     return {"status": "success", "success": True, "response": reply, "reply": reply, "insight": reply, "message": reply}
 
 class TaskBreakdownRequest(BaseModel):
@@ -295,13 +255,7 @@ def breakdown_task(req: TaskBreakdownRequest):
     raw_title = req.task_title or req.title or req.prompt or ""
     task_name = raw_title.strip()
     if not task_name:
-        return {
-            "status": "error",
-            "success": False,
-            "message": "Task title is required",
-            "task": "",
-            "subtasks": []
-        }
+        return {"status": "error", "success": False, "message": "Task title is required", "task": "", "subtasks": []}
     
     subtasks = []
     try:
@@ -311,7 +265,7 @@ def breakdown_task(req: TaskBreakdownRequest):
             Message(role="user", content=user_prompt)
         ]
         prompt_text = build_prompt_from_messages(messages)
-        raw_output = generate_response(prompt_text, max_tokens=120, temperature=0.3)
+        raw_output = generate_response(prompt_text, max_tokens=140, temperature=0.3)
         lines = [line.strip().lstrip("-*1234567890. ") for line in raw_output.splitlines() if line.strip()]
         for l in lines:
             if len(l) > 3 and not l.lower().startswith("here are") and not l.lower().startswith("subtask"):
@@ -336,6 +290,60 @@ def breakdown_task(req: TaskBreakdownRequest):
         "subtasks": subtasks[:4]
     }
 
+@app.post("/study_plan")
+def create_study_plan(req: StudyPlanRequest):
+    subject = req.subject or req.topic or req.goal or "General Productivity"
+    hours = req.daily_hours or 2.0
+    days = req.days or 7
+    user_prompt = (
+        f"Create a structured {days}-day study plan for '{subject}' with {hours} hours daily. "
+        "Divide it into clear daily blocks with focus topic, core objective, and recommended Pomodoro intervals. Keep it concise."
+    )
+    messages = [
+        Message(role="system", content=SYSTEM_PERSONA),
+        Message(role="user", content=user_prompt)
+    ]
+    prompt_text = build_prompt_from_messages(messages)
+    reply = generate_response(prompt_text, max_tokens=260, temperature=0.3)
+    return {
+        "status": "success",
+        "success": True,
+        "subject": subject,
+        "daily_hours": hours,
+        "days": days,
+        "plan": reply,
+        "response": reply
+    }
+
+@app.post("/focus_coaching")
+def focus_coaching(req: FocusCoachingRequest):
+    mins = req.focus_minutes or 0
+    distractions = req.distractions_count or 0
+    streak = req.streak_days or 0
+    query = req.user_query or "How can I improve my focus score today?"
+    
+    coaching_prompt = (
+        f"User performance data: {mins} focus minutes logged, {distractions} distraction interruptions, "
+        f"and an active streak of {streak} days. Question: '{query}'. "
+        "Provide 3 concise, highly actionable coaching recommendations based directly on these numbers. "
+        "Address distraction triggers, suggest appropriate Pomodoro session lengths, and give an encouraging productivity tip."
+    )
+    messages = [
+        Message(role="system", content=SYSTEM_PERSONA),
+        Message(role="user", content=coaching_prompt)
+    ]
+    prompt_text = build_prompt_from_messages(messages)
+    reply = generate_response(prompt_text, max_tokens=220, temperature=0.3)
+    return {
+        "status": "success",
+        "success": True,
+        "focus_minutes": mins,
+        "distractions_count": distractions,
+        "streak_days": streak,
+        "advice": reply,
+        "response": reply
+    }
+
 if __name__ == "__main__":
     import uvicorn
     import socket
@@ -347,6 +355,4 @@ if __name__ == "__main__":
         host = "0.0.0.0"
     except Exception:
         host = "127.0.0.1"
-    print(f"Starting Groot AI FastAPI server on http://{host}:8000...")
     uvicorn.run(app, host=host, port=8000)
-
