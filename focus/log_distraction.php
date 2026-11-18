@@ -35,6 +35,33 @@ if (empty($reason)) {
 $userId = (int)$userId;
 
 try {
+    $checkStmt = $conn->prepare("
+        SELECT id, duration_seconds 
+        FROM `distraction_logs` 
+        WHERE `user_id` = :uid AND `reason` = :reason 
+          AND `created_at` >= (NOW() - INTERVAL 60 SECOND)
+        ORDER BY `id` DESC LIMIT 1
+    ");
+    $checkStmt->execute([':uid' => $userId, ':reason' => $reason]);
+    $recent = $checkStmt->fetch(PDO::FETCH_ASSOC);
+    if ($recent) {
+        if ($durationSeconds > 0) {
+            $updateStmt = $conn->prepare("
+                UPDATE `distraction_logs` 
+                SET `duration_seconds` = `duration_seconds` + :dur 
+                WHERE `id` = :id
+            ");
+            $updateStmt->execute([':dur' => $durationSeconds, ':id' => (int)$recent['id']]);
+        }
+        http_response_code(200);
+        echo json_encode([
+            "status" => true,
+            "message" => "Distraction event consolidated.",
+            "id" => (int)$recent['id']
+        ]);
+        exit;
+    }
+
     $stmt = $conn->prepare("INSERT INTO `distraction_logs` (`user_id`, `reason`, `category`, `duration_seconds`) VALUES (:user_id, :reason, :category, :duration_seconds)");
     $stmt->execute([
         ':user_id' => $userId,

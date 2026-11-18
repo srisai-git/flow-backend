@@ -87,6 +87,39 @@ if (!empty($input['started_at'])) {
 }
 
 try {
+    $dupCheck = $conn->prepare("
+        SELECT id FROM focus_sessions 
+        WHERE user_id = :uid AND duration_minutes = :dur 
+          AND (started_at = :start OR TIMESTAMPDIFF(SECOND, started_at, :start2) BETWEEN -5 AND 5)
+        ORDER BY id DESC LIMIT 1
+    ");
+    $dupCheck->execute([
+        ':uid' => $userId,
+        ':dur' => $durationMinutes,
+        ':start' => $startedAt,
+        ':start2' => $startedAt
+    ]);
+    $existingId = $dupCheck->fetchColumn();
+    if ($existingId) {
+        $sumStmt = $conn->prepare("
+            SELECT COALESCE(SUM(duration_minutes), 0)
+            FROM focus_sessions
+            WHERE user_id = :uid AND created_at >= CURDATE() AND status = 'completed'
+        ");
+        $sumStmt->execute([':uid' => $userId]);
+        $todayTotalMinutes = (int)$sumStmt->fetchColumn();
+
+        echo json_encode([
+            "status" => "success",
+            "success" => true,
+            "message" => "Focus session already recorded.",
+            "session_id" => (int)$existingId,
+            "duration_minutes" => $durationMinutes,
+            "today_total_minutes" => $todayTotalMinutes
+        ]);
+        exit;
+    }
+
     $stmt = $conn->prepare("
         INSERT INTO focus_sessions (user_id, task_id, duration_minutes, session_type, tag, status, started_at, completed_at, created_at)
         VALUES (:uid, :tid, :dur, :type, :tag, :stat, :start, :end, NOW())
