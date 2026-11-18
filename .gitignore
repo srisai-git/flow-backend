@@ -1,5 +1,26 @@
+# Environment Configuration
+.env
+.env.*
+!.env.example
+
+# Python Cache & Virtual Environments
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
 groot_ai/__pycache__/
 groot_ai/groot_checkpoints/
 
+# Android Keys & Credentials
+*.jks
+*.keystore
+*.key
+local.properties
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
