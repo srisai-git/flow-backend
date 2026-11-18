@@ -5,7 +5,7 @@ function runAllMigrations(PDO $conn, bool $force = false): array {
         return [];
     }
 
-    $migrationFlag = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow_migrated_v6';
+    $migrationFlag = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow_migrated_v7';
     if (!$force && file_exists($migrationFlag)) {
         $alreadyRunInProcess = true;
         return [];
@@ -23,7 +23,13 @@ function runAllMigrations(PDO $conn, bool $force = false): array {
         $conn->exec("ALTER TABLE `focus_sessions` ADD COLUMN `tag` VARCHAR(100) DEFAULT 'General'");
     } catch (PDOException $e) {}
     try {
-        $conn->exec("ALTER TABLE `tasks` ADD COLUMN `scheduled_time` VARCHAR(20) DEFAULT NULL");
+        $conn->exec("ALTER TABLE `tasks` ADD COLUMN `scheduled_time` VARCHAR(100) DEFAULT NULL");
+    } catch (PDOException $e) {}
+    try {
+        $conn->exec("ALTER TABLE `tasks` MODIFY COLUMN `scheduled_time` VARCHAR(100) DEFAULT NULL");
+    } catch (PDOException $e) {}
+    try {
+        $conn->exec("ALTER TABLE `tasks` ADD COLUMN `deadline_timestamp` BIGINT DEFAULT NULL");
     } catch (PDOException $e) {}
 
     $conn->exec("

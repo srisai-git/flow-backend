@@ -24,6 +24,8 @@ $description = trim($input['description'] ?? '');
 $category    = trim($input['category'] ?? 'General');
 $priority    = strtolower(trim($input['priority'] ?? 'medium'));
 $dueDate     = trim($input['due_date'] ?? '');
+$scheduledTime = !empty($input['scheduled_time']) ? trim($input['scheduled_time']) : null;
+$deadlineTimestamp = !empty($input['deadline_timestamp']) ? (int)$input['deadline_timestamp'] : null;
 
 // Validation
 if (empty($userId) || !is_numeric($userId) || (int)$userId <= 0) {
@@ -67,8 +69,8 @@ try {
 
     // 2. Insert Task
     $stmt = $conn->prepare("
-        INSERT INTO tasks (user_id, title, description, category, priority, due_date, is_completed)
-        VALUES (:user_id, :title, :description, :category, :priority, :due_date, 0)
+        INSERT INTO tasks (user_id, title, description, category, priority, due_date, scheduled_time, deadline_timestamp, is_completed)
+        VALUES (:user_id, :title, :description, :category, :priority, :due_date, :scheduled_time, :deadline_timestamp, 0)
     ");
     $stmt->execute([
         ':user_id'     => $userId,
@@ -76,7 +78,9 @@ try {
         ':description' => !empty($description) ? $description : null,
         ':category'    => !empty($category) ? $category : 'General',
         ':priority'    => $priority,
-        ':due_date'    => $dueDate
+        ':due_date'    => $dueDate,
+        ':scheduled_time' => $scheduledTime,
+        ':deadline_timestamp' => $deadlineTimestamp
     ]);
 
     $taskId = (int)$conn->lastInsertId();
@@ -97,6 +101,8 @@ try {
             "category"     => $task['category'],
             "priority"     => $task['priority'],
             "due_date"     => $task['due_date'],
+            "scheduled_time" => $task['scheduled_time'] ?? null,
+            "deadline_timestamp" => !empty($task['deadline_timestamp']) ? (int)$task['deadline_timestamp'] : null,
             "is_completed" => (int)$task['is_completed'],
             "created_at"   => $task['created_at'],
             "updated_at"   => $task['updated_at']

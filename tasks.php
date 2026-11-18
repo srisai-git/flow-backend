@@ -19,7 +19,7 @@ $userId = (int)$userId;
 if ($method === 'GET') {
     // Return all tasks for the user without fake seeders
     $stmt = $conn->prepare("
-        SELECT id, user_id, title, description, category, priority, due_date, scheduled_time, is_completed, created_at
+        SELECT id, user_id, title, description, category, priority, due_date, scheduled_time, deadline_timestamp, is_completed, created_at
         FROM tasks
         WHERE user_id = :uid
         ORDER BY is_completed ASC, FIELD(priority, 'high', 'medium', 'low'), id DESC
@@ -39,6 +39,7 @@ if ($method === 'GET') {
                 "priority" => $t['priority'] ?: 'medium',
                 "due_date" => $t['due_date'] ?: date('Y-m-d'),
                 "scheduled_time" => $t['scheduled_time'] ?: null,
+                "deadline_timestamp" => !empty($t['deadline_timestamp']) ? (int)$t['deadline_timestamp'] : null,
                 "is_completed" => (bool)$t['is_completed'],
                 "created_at" => $t['created_at']
             ];
@@ -88,13 +89,67 @@ if ($method === 'POST') {
         exit;
     }
 
-    // Default action: Create task
+    if ($action === 'update') {
+        $taskId = (int)($input['task_id'] ?? $input['id'] ?? 0);
+        if ($taskId <= 0) {
+            http_response_code(400);
+            echo json_encode(["status" => false, "message" => "Valid task_id is required."]);
+            exit;
+        }
+
+        $title = trim($input['title'] ?? '');
+        $description = trim($input['description'] ?? '');
+        $priority = strtolower(trim($input['priority'] ?? 'medium'));
+        if (!in_array($priority, ['low', 'medium', 'high'])) $priority = 'medium';
+        $dueDate = trim($input['due_date'] ?? date('Y-m-d'));
+        $scheduledTime = !empty($input['scheduled_time']) ? trim($input['scheduled_time']) : null;
+        $deadlineTimestamp = !empty($input['deadline_timestamp']) ? (int)$input['deadline_timestamp'] : null;
+        $category = trim($input['category'] ?? 'General');
+
+        $stmt = $conn->prepare("
+            UPDATE tasks
+            SET title = :title, description = :desc, category = :cat, priority = :pri,
+                due_date = :due, scheduled_time = :stime, deadline_timestamp = :deadline
+            WHERE id = :id AND user_id = :uid
+        ");
+        $stmt->execute([
+            ':title' => $title,
+            ':desc' => $description,
+            ':cat' => $category,
+            ':pri' => $priority,
+            ':due' => $dueDate,
+            ':stime' => $scheduledTime,
+            ':deadline' => $deadlineTimestamp,
+            ':id' => $taskId,
+            ':uid' => $userId
+        ]);
+
+        echo json_encode([
+            "status" => true,
+            "message" => "Task updated successfully.",
+            "data" => [
+                "id" => $taskId,
+                "user_id" => $userId,
+                "title" => $title,
+                "description" => $description,
+                "category" => $category,
+                "priority" => $priority,
+                "due_date" => $dueDate,
+                "scheduled_time" => $scheduledTime,
+                "deadline_timestamp" => $deadlineTimestamp,
+                "is_completed" => false
+            ]
+        ]);
+        exit;
+    }
+
     $title = trim($input['title'] ?? '');
     $description = trim($input['description'] ?? '');
     $priority = strtolower(trim($input['priority'] ?? 'medium'));
     if (!in_array($priority, ['low', 'medium', 'high'])) $priority = 'medium';
     $dueDate = trim($input['due_date'] ?? date('Y-m-d'));
     $scheduledTime = !empty($input['scheduled_time']) ? trim($input['scheduled_time']) : null;
+    $deadlineTimestamp = !empty($input['deadline_timestamp']) ? (int)$input['deadline_timestamp'] : null;
     $category = trim($input['category'] ?? 'General');
 
     if (empty($title)) {
@@ -104,8 +159,8 @@ if ($method === 'POST') {
     }
 
     $stmt = $conn->prepare("
-        INSERT INTO tasks (user_id, title, description, category, priority, due_date, scheduled_time, is_completed)
-        VALUES (:uid, :title, :desc, :cat, :pri, :due, :stime, 0)
+        INSERT INTO tasks (user_id, title, description, category, priority, due_date, scheduled_time, deadline_timestamp, is_completed)
+        VALUES (:uid, :title, :desc, :cat, :pri, :due, :stime, :deadline, 0)
     ");
     $stmt->execute([
         ':uid' => $userId,
@@ -114,7 +169,8 @@ if ($method === 'POST') {
         ':cat' => $category,
         ':pri' => $priority,
         ':due' => $dueDate,
-        ':stime' => $scheduledTime
+        ':stime' => $scheduledTime,
+        ':deadline' => $deadlineTimestamp
     ]);
 
     $newId = (int)$conn->lastInsertId();
@@ -131,6 +187,7 @@ if ($method === 'POST') {
             "priority" => $priority,
             "due_date" => $dueDate,
             "scheduled_time" => $scheduledTime,
+            "deadline_timestamp" => $deadlineTimestamp,
             "is_completed" => false
         ]
     ]);

@@ -96,6 +96,18 @@ try {
         }
     }
 
+    if (array_key_exists('scheduled_time', $input)) {
+        $stime = !empty(trim($input['scheduled_time'])) ? trim($input['scheduled_time']) : null;
+        $updates[] = "scheduled_time = :scheduled_time";
+        $params[':scheduled_time'] = $stime;
+    }
+
+    if (array_key_exists('deadline_timestamp', $input)) {
+        $dtime = !empty($input['deadline_timestamp']) ? (int)$input['deadline_timestamp'] : null;
+        $updates[] = "deadline_timestamp = :deadline_timestamp";
+        $params[':deadline_timestamp'] = $dtime;
+    }
+
     if (isset($input['is_completed'])) {
         $isCompletedVal = $input['is_completed'];
         $parsedBool = filter_var($isCompletedVal, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
@@ -127,6 +139,8 @@ try {
             "category"     => $updated['category'],
             "priority"     => $updated['priority'],
             "due_date"     => $updated['due_date'],
+            "scheduled_time" => $updated['scheduled_time'] ?? null,
+            "deadline_timestamp" => !empty($updated['deadline_timestamp']) ? (int)$updated['deadline_timestamp'] : null,
             "is_completed" => (int)$updated['is_completed'],
             "created_at"   => $updated['created_at'],
             "updated_at"   => $updated['updated_at']
