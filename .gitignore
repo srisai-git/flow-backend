@@ -25,3 +25,6 @@ local.properties
 Thumbs.db
 .idea/
 .vscode/
+
+# User uploads
+uploads/
