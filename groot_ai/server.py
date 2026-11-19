@@ -1,10 +1,11 @@
 import os
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
+import html
 import re
 import time
 from collections import defaultdict
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -103,6 +104,186 @@ def is_non_english(text: str) -> bool:
         return True
     return False
 
+def extract_actions_and_reply(user_query: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    actions: List[Dict[str, Any]] = []
+    replies: List[str] = []
+    
+    sub_clauses = [c.strip() for c in re.split(r'\s+(?:and|then)\s+|;|\n', user_query, flags=re.IGNORECASE) if c.strip()]
+    if not sub_clauses:
+        sub_clauses = [user_query.strip()]
+        
+    for clause in sub_clauses:
+        c_lower = clause.lower()
+        
+        m_timer = re.search(r'\b(?:start|set|run|begin|launch|activate)\s+(?:a\s+)?(?:(\d+)\s*(?:min|minute|minutes|m)?)?\s*(focus|timer|session|break|pomodoro)?', clause, re.IGNORECASE)
+        m_timer2 = re.search(r'(\d+)\s*(?:min|minute|minutes|m)\s*(focus|timer|session|break|pomodoro)', clause, re.IGNORECASE)
+        if (m_timer and (m_timer.group(1) or m_timer.group(2))) or m_timer2:
+            mins = 25
+            if m_timer and m_timer.group(1):
+                mins = int(m_timer.group(1))
+            elif m_timer2:
+                mins = int(m_timer2.group(1))
+            mode = "FOCUS"
+            if "break" in c_lower:
+                mode = "LONG_BREAK" if mins >= 15 else "SHORT_BREAK"
+                if mins == 25:
+                    mins = 5
+            mins = max(1, min(180, mins))
+            actions.append({
+                "type": "START_FOCUS_TIMER",
+                "payload": {"duration": mins, "mode": mode}
+            })
+            mode_label = "focus session" if mode == "FOCUS" else "break"
+            replies.append(f"Started a {mins}-minute {mode_label} for you.")
+            continue
+            
+        if re.search(r'\b(?:pause|hold)\s+(?:the\s+)?(?:timer|focus|session)\b', clause, re.IGNORECASE):
+            actions.append({"type": "PAUSE_TIMER", "payload": {}})
+            replies.append("Paused the active focus timer.")
+            continue
+        if re.search(r'\b(?:resume|continue|unpause)\s+(?:the\s+)?(?:timer|focus|session)\b', clause, re.IGNORECASE):
+            actions.append({"type": "RESUME_TIMER", "payload": {}})
+            replies.append("Resumed your focus timer.")
+            continue
+        if re.search(r'\b(?:stop|end|cancel|reset)\s+(?:the\s+)?(?:timer|focus|session)\b', clause, re.IGNORECASE):
+            actions.append({"type": "STOP_TIMER", "payload": {}})
+            replies.append("Stopped the timer.")
+            continue
+            
+        if re.search(r'\b(?:enable|turn on|activate|start)\s+strict(?:\s+focus)?(?:\s+mode)?\b', clause, re.IGNORECASE):
+            actions.append({"type": "ENABLE_STRICT_MODE", "payload": {}})
+            replies.append("Enabled Strict Focus Mode. Distracting apps are now locked.")
+            continue
+        if re.search(r'\b(?:disable|turn off|deactivate|stop)\s+strict(?:\s+focus)?(?:\s+mode)?\b', clause, re.IGNORECASE):
+            actions.append({"type": "DISABLE_STRICT_MODE", "payload": {}})
+            replies.append("Disabled Strict Focus Mode.")
+            continue
+            
+        if re.search(r'\b(?:clear|delete|remove)\s+(?:all\s+)?completed\s+tasks?\b', clause, re.IGNORECASE):
+            actions.append({"type": "CLEAR_COMPLETED_TASKS", "payload": {}})
+            replies.append("Cleared all completed tasks.")
+            continue
+            
+        m_comp = re.search(r'\b(?:complete|finish|done|mark\s+complete|check\s+off)\s+(?:task\s+)?[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
+        if m_comp and not any(w in m_comp.group(1).lower() for w in ["habit", "timer"]):
+            t_title = m_comp.group(1).strip().strip(".'\"")
+            actions.append({"type": "COMPLETE_TASK", "payload": {"title": t_title}})
+            replies.append(f"Marked task '{t_title}' as completed.")
+            continue
+            
+        m_uncomp = re.search(r'\b(?:uncomplete|reopen|undo)\s+(?:task\s+)?[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
+        if m_uncomp and not any(w in m_uncomp.group(1).lower() for w in ["habit", "timer"]):
+            t_title = m_uncomp.group(1).strip().strip(".'\"")
+            actions.append({"type": "UNCOMPLETE_TASK", "payload": {"title": t_title}})
+            replies.append(f"Reopened task '{t_title}'.")
+            continue
+            
+        m_del_task = re.search(r'\b(?:delete|remove)\s+task\s+[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
+        if m_del_task:
+            t_title = m_del_task.group(1).strip().strip(".'\"")
+            actions.append({"type": "DELETE_TASK", "payload": {"title": t_title}})
+            replies.append(f"Deleted task '{t_title}'.")
+            continue
+            
+        m_create_task = re.search(r'\b(?:create|add|new|schedule)\s+(?:a\s+)?task\s+(?:named|to|called)?\s*[\'"]?([^\'"]+?)[\'"]?(?:\s+with\s+(high|medium|low)\s+priority)?$', clause, re.IGNORECASE)
+        if m_create_task:
+            raw_title = m_create_task.group(1).strip().strip(".'\"")
+            priority = "medium"
+            if m_create_task.group(2):
+                priority = m_create_task.group(2).lower()
+            elif "high priority" in c_lower or "urgent" in c_lower:
+                priority = "high"
+                raw_title = re.sub(r'(?i)\s+with\s+high\s+priority', '', raw_title).strip()
+            elif "low priority" in c_lower:
+                priority = "low"
+                raw_title = re.sub(r'(?i)\s+with\s+low\s+priority', '', raw_title).strip()
+                
+            actions.append({
+                "type": "CREATE_TASK",
+                "payload": {"title": raw_title, "priority": priority, "category": "General"}
+            })
+            replies.append(f"Created task '{raw_title}' with {priority} priority.")
+            continue
+            
+        if re.search(r'\b(?:list|show|view|get|what are)\s+(?:my\s+)?(?:pending|overdue|completed|all)?\s*tasks\b', clause, re.IGNORECASE):
+            flt = "all"
+            if "pending" in c_lower:
+                flt = "pending"
+            elif "completed" in c_lower:
+                flt = "completed"
+            elif "overdue" in c_lower:
+                flt = "overdue"
+            elif "high" in c_lower:
+                flt = "high_priority"
+            actions.append({"type": "LIST_TASKS", "payload": {"filter": flt}})
+            replies.append(f"Here is your {flt} tasks overview.")
+            continue
+            
+        m_habit = re.search(r'\b(?:create|add|new|track|build)\s+(?:a\s+)?habit\s+(?:named|to|called)?\s*[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
+        if m_habit:
+            h_title = m_habit.group(1).strip().strip(".'\"")
+            actions.append({
+                "type": "CREATE_HABIT",
+                "payload": {"title": h_title, "frequency": "daily", "icon": "bolt"}
+            })
+            replies.append(f"Created the daily habit '{h_title}'.")
+            continue
+            
+        m_chk_habit = re.search(r'\b(?:check\s+off|log|complete|done)\s+(?:habit\s+)?[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
+        if m_chk_habit and "task" not in c_lower and "timer" not in c_lower:
+            h_title = m_chk_habit.group(1).strip().strip(".'\"")
+            actions.append({"type": "CHECK_OFF_HABIT", "payload": {"title": h_title}})
+            replies.append(f"Checked off habit '{h_title}' for today.")
+            continue
+            
+        m_del_habit = re.search(r'\b(?:delete|remove)\s+habit\s+[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
+        if m_del_habit:
+            h_title = m_del_habit.group(1).strip().strip(".'\"")
+            actions.append({"type": "DELETE_HABIT", "payload": {"title": h_title}})
+            replies.append(f"Deleted habit '{h_title}'.")
+            continue
+            
+        if re.search(r'\b(?:habit\s+status|check\s+habits|my\s+habits\s+today|how\s+are\s+my\s+habits)\b', clause, re.IGNORECASE):
+            actions.append({"type": "HABIT_STATUS", "payload": {}})
+            replies.append("Here is your habit completion status for today.")
+            continue
+            
+        if re.search(r'\b(?:focus\s+summary|my\s+stats|my\s+analytics|how\s+much\s+did\s+i\s+focus|today\'?s?\s+stats|focus\s+minutes)\b', clause, re.IGNORECASE):
+            actions.append({"type": "GET_FOCUS_SUMMARY", "payload": {}})
+            replies.append("Here is your focus and productivity breakdown.")
+            continue
+            
+        m_nav = re.search(r'\b(?:open|show|go to|take me to|navigate to|view)\s+(?:my\s+)?(timer|focus timer|insights|analytics|habits|tasks|task manager|profile|settings|dashboard|home)\b', clause, re.IGNORECASE)
+        if m_nav:
+            dest = m_nav.group(1).lower()
+            tab = "tasks"
+            if "timer" in dest or "focus" in dest:
+                tab = "focus_timer"
+            elif "habit" in dest:
+                tab = "habits"
+            elif "insight" in dest or "analytic" in dest:
+                tab = "analytics"
+            elif "profile" in dest or "setting" in dest:
+                tab = "profile"
+            elif "home" in dest or "dash" in dest:
+                tab = "home"
+            actions.append({"type": "NAVIGATE_TAB", "payload": {"tab": tab, "route": tab}})
+            replies.append(f"Navigating to {tab}.")
+            continue
+            
+        if re.search(r'\b(?:export|share|download|save)\s+(?:this\s+)?(?:chat|transcript|conversation)\b', clause, re.IGNORECASE):
+            actions.append({"type": "EXPORT_CHAT", "payload": {}})
+            replies.append("Exporting chat transcript.")
+            continue
+            
+        if re.search(r'\b(?:clear|delete|reset)\s+(?:this\s+)?(?:chat|history|conversation)\b', clause, re.IGNORECASE):
+            actions.append({"type": "CLEAR_CHAT", "payload": {}})
+            replies.append("Cleared chat history.")
+            continue
+
+    composite_reply = " ".join(replies) if replies else None
+    return actions, composite_reply
+
 class Message(BaseModel):
     role: str = Field(..., max_length=50)
     content: str = Field(..., max_length=4000)
@@ -120,6 +301,14 @@ class SimpleChatRequest(BaseModel):
     prompt: Optional[str] = Field(None, max_length=4000)
     query: Optional[str] = Field(None, max_length=4000)
     text: Optional[str] = Field(None, max_length=4000)
+
+class ChatRequest(BaseModel):
+    message: Optional[str] = Field(None, max_length=4000)
+    prompt: Optional[str] = Field(None, max_length=4000)
+    query: Optional[str] = Field(None, max_length=4000)
+    text: Optional[str] = Field(None, max_length=4000)
+    history: Optional[List[Any]] = None
+    user_id: Optional[int] = 1
 
 class StudyPlanRequest(BaseModel):
     subject: Optional[str] = None
@@ -172,12 +361,87 @@ def generate_response(prompt_text: str, max_tokens: int = 220, temperature: floa
     reply = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
     reply = reply.replace("<|im_end|>", "").strip()
     reply = emoji_pattern.sub('', reply).strip()
+    reply = html.unescape(reply)
     return reply
 
 @app.get("/")
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "Groot AI Engine", "ready": True}
+
+@app.post("/chat")
+def chat_endpoint(req: ChatRequest):
+    user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
+    user_msg = html.unescape(user_msg.strip())
+    
+    if is_non_english(user_msg):
+        return {
+            "status": "success",
+            "success": True,
+            "reply": ENGLISH_REFUSAL_MESSAGE,
+            "response": ENGLISH_REFUSAL_MESSAGE,
+            "insight": ENGLISH_REFUSAL_MESSAGE,
+            "message": ENGLISH_REFUSAL_MESSAGE,
+            "actions": [],
+            "action": None
+        }
+    if PHYSICAL_ACTION_RE.search(user_msg):
+        return {
+            "status": "success",
+            "success": True,
+            "reply": PHYSICAL_DECLINE_MESSAGE,
+            "response": PHYSICAL_DECLINE_MESSAGE,
+            "insight": PHYSICAL_DECLINE_MESSAGE,
+            "message": PHYSICAL_DECLINE_MESSAGE,
+            "actions": [],
+            "action": None
+        }
+    if OFF_TOPIC_RE.search(user_msg):
+        return {
+            "status": "success",
+            "success": True,
+            "reply": DECLINE_MESSAGE,
+            "response": DECLINE_MESSAGE,
+            "insight": DECLINE_MESSAGE,
+            "message": DECLINE_MESSAGE,
+            "actions": [],
+            "action": None
+        }
+
+    actions, extracted_reply = extract_actions_and_reply(user_msg)
+    if actions and extracted_reply:
+        unescaped_reply = html.unescape(extracted_reply)
+        return {
+            "status": "success",
+            "success": True,
+            "reply": unescaped_reply,
+            "response": unescaped_reply,
+            "insight": unescaped_reply,
+            "message": unescaped_reply,
+            "actions": actions,
+            "action": actions[0] if actions else None,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+    messages = [
+        Message(role="system", content=SYSTEM_PERSONA),
+        Message(role="user", content=user_msg)
+    ]
+    prompt_text = build_prompt_from_messages(messages)
+    llm_reply = generate_response(prompt_text, max_tokens=220, temperature=0.3)
+    unescaped_llm_reply = html.unescape(llm_reply)
+    
+    return {
+        "status": "success",
+        "success": True,
+        "reply": unescaped_llm_reply,
+        "response": unescaped_llm_reply,
+        "insight": unescaped_llm_reply,
+        "message": unescaped_llm_reply,
+        "actions": actions,
+        "action": actions[0] if actions else None,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
 
 @app.post("/v1/chat/completions")
 def chat_completions(req: ChatCompletionRequest):
@@ -190,6 +454,8 @@ def chat_completions(req: ChatCompletionRequest):
     if not user_content and req.prompt:
         user_content = req.prompt
     
+    user_content = html.unescape(user_content.strip()) if user_content else ""
+
     if user_content and is_non_english(user_content):
         return {
             "id": "chatcmpl-groot-language",
@@ -198,6 +464,9 @@ def chat_completions(req: ChatCompletionRequest):
             "response": ENGLISH_REFUSAL_MESSAGE,
             "reply": ENGLISH_REFUSAL_MESSAGE,
             "insight": ENGLISH_REFUSAL_MESSAGE,
+            "message": ENGLISH_REFUSAL_MESSAGE,
+            "actions": [],
+            "action": None,
             "success": True
         }
 
@@ -209,6 +478,9 @@ def chat_completions(req: ChatCompletionRequest):
             "response": PHYSICAL_DECLINE_MESSAGE,
             "reply": PHYSICAL_DECLINE_MESSAGE,
             "insight": PHYSICAL_DECLINE_MESSAGE,
+            "message": PHYSICAL_DECLINE_MESSAGE,
+            "actions": [],
+            "action": None,
             "success": True
         }
 
@@ -220,8 +492,29 @@ def chat_completions(req: ChatCompletionRequest):
             "response": DECLINE_MESSAGE,
             "reply": DECLINE_MESSAGE,
             "insight": DECLINE_MESSAGE,
+            "message": DECLINE_MESSAGE,
+            "actions": [],
+            "action": None,
             "success": True
         }
+
+    actions, extracted_reply = extract_actions_and_reply(user_content)
+    if actions and extracted_reply:
+        unescaped_reply = html.unescape(extracted_reply)
+        return {
+            "id": "chatcmpl-groot-action",
+            "object": "chat.completion",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": unescaped_reply}, "finish_reason": "stop"}],
+            "response": unescaped_reply,
+            "reply": unescaped_reply,
+            "insight": unescaped_reply,
+            "message": unescaped_reply,
+            "actions": actions,
+            "action": actions[0] if actions else None,
+            "status": "success",
+            "success": True
+        }
+
     if not messages and req.prompt:
         messages = [
             Message(role="system", content=SYSTEM_PERSONA),
@@ -239,15 +532,18 @@ def chat_completions(req: ChatCompletionRequest):
     top_p = req.top_p if req.top_p is not None else 0.9
     
     reply = generate_response(prompt_text, max_tokens=max_tokens, temperature=temp, top_p=top_p)
+    unescaped_reply = html.unescape(reply)
     
     return {
         "id": "chatcmpl-groot",
         "object": "chat.completion",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": reply}, "finish_reason": "stop"}],
-        "response": reply,
-        "reply": reply,
-        "insight": reply,
-        "message": reply,
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": unescaped_reply}, "finish_reason": "stop"}],
+        "response": unescaped_reply,
+        "reply": unescaped_reply,
+        "insight": unescaped_reply,
+        "message": unescaped_reply,
+        "actions": actions,
+        "action": actions[0] if actions else None,
         "status": "success",
         "success": True
     }
@@ -255,58 +551,108 @@ def chat_completions(req: ChatCompletionRequest):
 @app.post("/ask_groot")
 def ask_groot(req: SimpleChatRequest):
     user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
+    user_msg = html.unescape(user_msg.strip())
+    
     if is_non_english(user_msg):
-        return {"status": "success", "success": True, "response": ENGLISH_REFUSAL_MESSAGE, "reply": ENGLISH_REFUSAL_MESSAGE, "insight": ENGLISH_REFUSAL_MESSAGE, "message": ENGLISH_REFUSAL_MESSAGE}
+        return {
+            "status": "success",
+            "success": True,
+            "response": ENGLISH_REFUSAL_MESSAGE,
+            "reply": ENGLISH_REFUSAL_MESSAGE,
+            "insight": ENGLISH_REFUSAL_MESSAGE,
+            "message": ENGLISH_REFUSAL_MESSAGE,
+            "actions": [],
+            "action": None
+        }
     if PHYSICAL_ACTION_RE.search(user_msg):
-        return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE}
+        return {
+            "status": "success",
+            "success": True,
+            "response": PHYSICAL_DECLINE_MESSAGE,
+            "reply": PHYSICAL_DECLINE_MESSAGE,
+            "insight": PHYSICAL_DECLINE_MESSAGE,
+            "message": PHYSICAL_DECLINE_MESSAGE,
+            "actions": [],
+            "action": None
+        }
     if OFF_TOPIC_RE.search(user_msg):
-        return {"status": "success", "success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "message": DECLINE_MESSAGE}
+        return {
+            "status": "success",
+            "success": True,
+            "response": DECLINE_MESSAGE,
+            "reply": DECLINE_MESSAGE,
+            "insight": DECLINE_MESSAGE,
+            "message": DECLINE_MESSAGE,
+            "actions": [],
+            "action": None
+        }
+
+    actions, extracted_reply = extract_actions_and_reply(user_msg)
+    if actions and extracted_reply:
+        unescaped_reply = html.unescape(extracted_reply)
+        return {
+            "status": "success",
+            "success": True,
+            "response": unescaped_reply,
+            "reply": unescaped_reply,
+            "insight": unescaped_reply,
+            "message": unescaped_reply,
+            "actions": actions,
+            "action": actions[0] if actions else None,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+
     messages = [
         Message(role="system", content=SYSTEM_PERSONA),
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
     reply = generate_response(prompt_text, max_tokens=220, temperature=0.3)
-    return {"status": "success", "success": True, "response": reply, "reply": reply, "insight": reply, "message": reply}
+    unescaped_reply = html.unescape(reply)
+    return {
+        "status": "success",
+        "success": True,
+        "response": unescaped_reply,
+        "reply": unescaped_reply,
+        "insight": unescaped_reply,
+        "message": unescaped_reply,
+        "actions": actions,
+        "action": actions[0] if actions else None,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
 
 @app.post("/predict")
 def predict(req: SimpleChatRequest):
-    user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
-    if is_non_english(user_msg):
-        return {"status": "success", "success": True, "response": ENGLISH_REFUSAL_MESSAGE, "reply": ENGLISH_REFUSAL_MESSAGE, "insight": ENGLISH_REFUSAL_MESSAGE, "message": ENGLISH_REFUSAL_MESSAGE}
-    if PHYSICAL_ACTION_RE.search(user_msg):
-        return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE}
-    if OFF_TOPIC_RE.search(user_msg):
-        return {"status": "success", "success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "message": DECLINE_MESSAGE}
-    messages = [
-        Message(role="system", content=SYSTEM_PERSONA),
-        Message(role="user", content=user_msg)
-    ]
-    prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=220, temperature=0.3)
-    return {"status": "success", "success": True, "response": reply, "reply": reply, "insight": reply, "message": reply}
+    return ask_groot(req)
 
 @app.post("/generate")
 def generate(req: dict):
     user_msg = req.get("prompt") or req.get("message") or req.get("query") or ""
+    user_msg = html.unescape(user_msg.strip())
+    
     if user_msg and PHYSICAL_ACTION_RE.search(user_msg):
-        return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE}
+        return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE, "actions": [], "action": None}
     if user_msg and OFF_TOPIC_RE.search(user_msg):
-        return {"status": "success", "success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "message": DECLINE_MESSAGE}
+        return {"status": "success", "success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "message": DECLINE_MESSAGE, "actions": [], "action": None}
+
+    actions, extracted_reply = extract_actions_and_reply(user_msg)
+    if actions and extracted_reply:
+        unescaped_reply = html.unescape(extracted_reply)
+        return {"status": "success", "success": True, "response": unescaped_reply, "reply": unescaped_reply, "insight": unescaped_reply, "message": unescaped_reply, "actions": actions, "action": actions[0] if actions else None}
 
     if "messages" in req and isinstance(req["messages"], list):
         msg_objs = [Message(**m) if isinstance(m, dict) else m for m in req["messages"]]
         prompt_text = build_prompt_from_messages(msg_objs)
     else:
-        user_msg = req.get("prompt") or req.get("message") or req.get("query") or "Hello Groot."
         messages = [
             Message(role="system", content=SYSTEM_PERSONA),
-            Message(role="user", content=user_msg)
+            Message(role="user", content=user_msg or "Hello Groot.")
         ]
         prompt_text = build_prompt_from_messages(messages)
     
     reply = generate_response(prompt_text, max_tokens=220, temperature=0.4)
-    return {"status": "success", "success": True, "response": reply, "reply": reply, "insight": reply, "message": reply}
+    unescaped_reply = html.unescape(reply)
+    return {"status": "success", "success": True, "response": unescaped_reply, "reply": unescaped_reply, "insight": unescaped_reply, "message": unescaped_reply, "actions": actions, "action": actions[0] if actions else None}
 
 class TaskBreakdownRequest(BaseModel):
     task_title: Optional[str] = None
@@ -317,7 +663,7 @@ class TaskBreakdownRequest(BaseModel):
 @app.post("/task/breakdown")
 def breakdown_task(req: TaskBreakdownRequest):
     raw_title = req.task_title or req.title or req.prompt or ""
-    task_name = raw_title.strip()
+    task_name = html.unescape(raw_title.strip())
     if not task_name:
         return {"status": "error", "success": False, "message": "Task title is required", "task": "", "subtasks": []}
     
@@ -330,7 +676,7 @@ def breakdown_task(req: TaskBreakdownRequest):
         ]
         prompt_text = build_prompt_from_messages(messages)
         raw_output = generate_response(prompt_text, max_tokens=140, temperature=0.3)
-        lines = [line.strip().lstrip("-*1234567890. ") for line in raw_output.splitlines() if line.strip()]
+        lines = [html.unescape(line.strip().lstrip("-*1234567890. ")) for line in raw_output.splitlines() if line.strip()]
         for l in lines:
             if len(l) > 3 and not l.lower().startswith("here are") and not l.lower().startswith("subtask"):
                 subtasks.append(l)
@@ -356,7 +702,7 @@ def breakdown_task(req: TaskBreakdownRequest):
 
 @app.post("/study_plan")
 def create_study_plan(req: StudyPlanRequest):
-    subject = req.subject or req.topic or req.goal or "General Productivity"
+    subject = html.unescape((req.subject or req.topic or req.goal or "General Productivity").strip())
     hours = req.daily_hours or 2.0
     days = req.days or 7
     user_prompt = (
@@ -369,14 +715,15 @@ def create_study_plan(req: StudyPlanRequest):
     ]
     prompt_text = build_prompt_from_messages(messages)
     reply = generate_response(prompt_text, max_tokens=260, temperature=0.3)
+    unescaped_reply = html.unescape(reply)
     return {
         "status": "success",
         "success": True,
         "subject": subject,
         "daily_hours": hours,
         "days": days,
-        "plan": reply,
-        "response": reply
+        "plan": unescaped_reply,
+        "response": unescaped_reply
     }
 
 @app.post("/focus_coaching")
@@ -384,7 +731,7 @@ def focus_coaching(req: FocusCoachingRequest):
     mins = req.focus_minutes or 0
     distractions = req.distractions_count or 0
     streak = req.streak_days or 0
-    query = req.user_query or "How can I improve my focus score today?"
+    query = html.unescape((req.user_query or "How can I improve my focus score today?").strip())
     
     coaching_prompt = (
         f"User performance data: {mins} focus minutes logged, {distractions} distraction interruptions, "
@@ -398,14 +745,15 @@ def focus_coaching(req: FocusCoachingRequest):
     ]
     prompt_text = build_prompt_from_messages(messages)
     reply = generate_response(prompt_text, max_tokens=220, temperature=0.3)
+    unescaped_reply = html.unescape(reply)
     return {
         "status": "success",
         "success": True,
         "focus_minutes": mins,
         "distractions_count": distractions,
         "streak_days": streak,
-        "advice": reply,
-        "response": reply
+        "advice": unescaped_reply,
+        "response": unescaped_reply
     }
 
 if __name__ == "__main__":

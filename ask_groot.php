@@ -1,5 +1,4 @@
 <?php
-// ask_groot.php - Autonomous In-App Agent & Conversational AI Proxy Bridge
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Headers: Content-Type, Authorization");
 header("Access-Control-Allow-Methods: POST, GET, OPTIONS");
@@ -15,44 +14,55 @@ require_once __DIR__ . '/config/db.php';
 $json = getJsonInput();
 $input = array_merge($_GET, $_POST, $json);
 
-$prompt = trim($input['prompt'] ?? $input['message'] ?? $input['query'] ?? $input['text'] ?? '');
+$rawPrompt = trim($input['prompt'] ?? $input['message'] ?? $input['query'] ?? $input['text'] ?? '');
+$prompt = html_entity_decode($rawPrompt, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 $userId = intval($input['user_id'] ?? $input['userId'] ?? 1);
 $history = isset($input['history']) && is_array($input['history']) ? $input['history'] : [];
 
 if (empty($prompt)) {
     echo json_encode([
         "status" => "error",
+        "reply" => "Please ask a question or command Groot to perform an action.",
         "insight" => "Please ask a question or command Groot to perform an action.",
-        "message" => "Empty prompt"
+        "message" => "Empty prompt",
+        "actions" => [],
+        "action" => null
     ]);
     exit();
 }
 
 $lowerPrompt = strtolower($prompt);
 
-// Guardrail check: strictly intercept physical/biological action queries
 if (preg_match('/\b(sing|singing|song|eat|eating|food|sleep|sleeping|sleepy|run|running|dance|dancing|walk|walking|cook|cooking|drink|drinking)\b/i', $prompt)) {
+    $decline = "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.";
     echo json_encode([
         "status" => "success",
-        "insight" => "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.",
-        "message" => "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.",
+        "success" => true,
+        "reply" => $decline,
+        "insight" => $decline,
+        "response" => $decline,
+        "message" => $decline,
+        "actions" => [],
         "action" => null
     ]);
     exit();
 }
 
-// Guardrail check: immediately intercept off-topic or pop culture queries
-if (preg_match('/\b(rajini|rajinikanth|actor|actress|movie|cinema|film|celebrity|hero|director|cricket|football|fifa|ipl|messi|ronaldo|politician|politics|president|minister|song|bollywood|hollywood|kollywood|tollywood)\b/i', $prompt)) {
+if (preg_match('/\b(rajini|rajinikanth|actor|actress|movie|cinema|film|celebrity|hero|director|cricket|football|fifa|ipl|messi|ronaldo|politician|politics|president|minister|song|bollywood|hollywood|kollywood|tollywood|gossip)\b/i', $prompt)) {
+    $decline = "I am dedicated to your productivity and learning inside FocusFlow. I can help you plan study sessions, write code, solve problems, or track your habits. What would you like to accomplish today?";
     echo json_encode([
         "status" => "success",
-        "insight" => "I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?",
-        "message" => "I'm dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?",
+        "success" => true,
+        "reply" => $decline,
+        "insight" => $decline,
+        "response" => $decline,
+        "message" => $decline,
+        "actions" => [],
         "action" => null
     ]);
     exit();
 }
 
-// 1. Gather real user metrics if query is productivity-related
 $isProductivityQuery = preg_match('/\b(focus|habit|habits|streak|streaks|task|tasks|stat|stats|metric|metrics|progress|routine|sessions?|today)\b/i', $lowerPrompt);
 
 $productivityContext = "";
@@ -95,276 +105,237 @@ if ($isProductivityQuery && $userId > 0 && isset($conn)) {
     }
 }
 
-// 2. Base System Prompt with In-App Capabilities & Knowledge Base
-$systemInstruction = "You are Groot, the dedicated in-app productivity companion for FocusFlow. "
-                   . "STRICT OPERATIONAL BOUNDARIES: "
-                   . "- You are a digital software assistant. You CANNOT perform biological or physical actions such as singing, eating, running, or sleeping. If asked, politely state: "
-                   . "\"As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.\" "
-                   . "- Strictly decline general pop-culture trivia, movie questions, or non-productivity queries, steering the user back to deep work and flow state. "
-                   . "- If asked anything outside FocusFlow or core productivity/focus advice, politely decline and steer the user back: "
-                   . "\"I am dedicated exclusively to your productivity inside FocusFlow. I can help you start a timer, create a habit, or review your focus analytics. What would you like to accomplish today?\" "
-                   . "- Never invent facts or hallucinate answers. "
-                   . "FULL FOCUSFLOW KNOWLEDGE: "
-                   . "- Focus Timer: Deep work, Pomodoro sessions, custom durations, and break reminders. "
-                   . "- Habit Tracker: Daily streaks, habit checklists, and completion consistency. "
-                   . "- Distraction Log: Real-time Digital Wellbeing screen time tracking and usage deltas. "
-                   . "- Analytics: Daily and monthly focus minutes and session metrics. "
-                   . "- Themes: Clean Light (default) and Default Dark (#0F0F14). "
-                   . "ACTION CAPABILITY: "
-                   . "If the user asks you to perform an in-app action (such as starting a timer, adding a task, creating a habit, navigating, or setting goals), "
-                   . "append an action block at the very end of your response in this exact format: "
-                   . "[ACTION: {\"type\": \"START_TIMER\", \"duration\": 25, \"mode\": \"FOCUS\"}] "
-                   . "or [ACTION: {\"type\": \"CREATE_TASK\", \"title\": \"...\", \"priority\": \"medium\", \"category\": \"General\"}] "
-                   . "or [ACTION: {\"type\": \"CREATE_HABIT\", \"title\": \"...\", \"frequency\": \"daily\", \"icon\": \"bolt\"}] "
-                   . "or [ACTION: {\"type\": \"NAVIGATE\", \"route\": \"timer|insights|habits|tasks|profile|export_data\"}] "
-                   . "or [ACTION: {\"type\": \"SET_GOAL\", \"daily_minutes\": 240}]. "
-                   . "Answer concisely, directly, and helpfully. "
-                   . "Never use emojis.";
+$detectedActions = [];
+$aiResponseText = "";
 
-if (!empty($productivityContext)) {
-    $systemInstruction .= "\n\nVerified user productivity context: " . $productivityContext;
+$ch = curl_init("http://127.0.0.1:8000/chat");
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_POST, true);
+curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+    "message" => $prompt,
+    "prompt" => $prompt,
+    "user_id" => $userId,
+    "history" => $history
+]));
+curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
+curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$curlError = curl_error($ch);
+curl_close($ch);
+
+if (!$curlError && $httpCode === 200 && !empty($response)) {
+    $decoded = json_decode($response, true);
+    if (!empty($decoded['reply'])) {
+        $aiResponseText = trim($decoded['reply']);
+    } elseif (!empty($decoded['response'])) {
+        $aiResponseText = trim($decoded['response']);
+    } elseif (!empty($decoded['insight'])) {
+        $aiResponseText = trim($decoded['insight']);
+    }
+    if (!empty($decoded['actions']) && is_array($decoded['actions'])) {
+        $detectedActions = $decoded['actions'];
+    } elseif (!empty($decoded['action'])) {
+        $detectedActions = [$decoded['action']];
+    }
 }
 
-// 3. Assemble Conversation Messages with History
-$messages = [
-    ["role" => "system", "content" => $systemInstruction]
-];
+if (empty($detectedActions)) {
+    $subClauses = preg_split('/\s+(?:and|then)\s+|;|\n/i', $prompt);
+    $actionReplies = [];
 
-if (!empty($history)) {
-    $trimmedHistory = array_slice($history, -10);
-    foreach ($trimmedHistory as $item) {
-        $role = $item['role'] ?? ($item['isFromUser'] ?? false ? 'user' : 'assistant');
-        $content = trim($item['content'] ?? $item['text'] ?? '');
-        if ($content !== '') {
-            $messages[] = [
-                "role" => in_array($role, ['user', 'assistant', 'system']) ? $role : 'user',
-                "content" => $content
+    foreach ($subClauses as $clause) {
+        $c = trim($clause);
+        if (empty($c)) continue;
+        $cLower = strtolower($c);
+
+        if (preg_match('/(?:start|set|run|begin|launch|activate)\s+(?:a\s+)?(\d+)?\s*(?:min|minute|minutes|m)?\s*(focus|timer|session|break|pomodoro)?/i', $c, $mTimer) ||
+            preg_match('/(\d+)\s*(?:min|minute|minutes|m)\s*(focus|timer|session|break|pomodoro)/i', $c, $mTimer2)) {
+            $duration = 25;
+            if (!empty($mTimer[1])) $duration = (int)$mTimer[1];
+            elseif (!empty($mTimer2[1])) $duration = (int)$mTimer2[1];
+            $mode = "FOCUS";
+            if (strpos($cLower, 'break') !== false) {
+                $mode = ($duration >= 15) ? "LONG_BREAK" : "SHORT_BREAK";
+                if ($duration === 25) $duration = 5;
+            }
+            $duration = max(1, min(180, $duration));
+            $detectedActions[] = [
+                "type" => "START_FOCUS_TIMER",
+                "payload" => ["duration" => $duration, "mode" => $mode]
             ];
-        }
-    }
-}
-
-$messages[] = [
-    "role" => "user",
-    "content" => $prompt
-];
-
-$detectedAction = null;
-
-// 4. Forward to local fine-tuned model running on port 8000 if not already handled
-if (empty($aiResponseText)) {
-    $payload = [
-        "model" => "groot",
-        "messages" => $messages,
-        "temperature" => 0.6,
-        "max_tokens" => 600,
-        "top_p" => 0.9
-    ];
-
-    $ch = curl_init("http://127.0.0.1:8000/v1/chat/completions");
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-    curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 40);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
-
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
-
-    if (!$curlError && $httpCode === 200 && !empty($response)) {
-        $decoded = json_decode($response, true);
-        if (!empty($decoded['choices'][0]['message']['content'])) {
-            $aiResponseText = trim($decoded['choices'][0]['message']['content']);
-        } elseif (!empty($decoded['reply'])) {
-            $aiResponseText = trim($decoded['reply']);
-        } elseif (!empty($decoded['insight'])) {
-            $aiResponseText = trim($decoded['insight']);
-        }
-    }
-}
-
-// 5. Check if output has an embedded action tag: [ACTION: {...}]
-if (!empty($aiResponseText) && preg_match('/\[ACTION:\s*(\{.*?\})\]/s', $aiResponseText, $actionMatch)) {
-    $actionDecoded = json_decode($actionMatch[1], true);
-    if (is_array($actionDecoded) && !empty($actionDecoded['type'])) {
-        $detectedAction = $actionDecoded;
-        // Clean out action tag from user-facing text
-        $aiResponseText = trim(str_replace($actionMatch[0], '', $aiResponseText));
-    }
-}
-
-// 6. Autonomous Action Detection Engine (Rule-based parsing if model didn't emit tag or is offline)
-if ($detectedAction === null) {
-    // 6a. Timer Action Detection
-    if (preg_match('/(?:start|set|run|begin|launch|activate)\s+(?:a\s+)?(\d+)?\s*(?:min|minute|minutes|m)?\s*(focus|timer|session|break|pomodoro)?/i', $prompt, $mTimer) ||
-        preg_match('/(\d+)\s*(?:min|minute|minutes)\s*(focus|timer|session|break)/i', $prompt, $mTimer2)) {
-        
-        $duration = 25;
-        $mode = "FOCUS";
-        
-        if (!empty($mTimer[1])) {
-            $duration = (int)$mTimer[1];
-        } elseif (!empty($mTimer2[1])) {
-            $duration = (int)$mTimer2[1];
-        }
-        
-        if (preg_match('/break/i', $prompt)) {
-            $mode = ($duration >= 15) ? "LONG_BREAK" : "SHORT_BREAK";
-            if ($duration === 25) $duration = 5;
-        }
-
-        $duration = max(5, min(90, $duration));
-
-        $detectedAction = [
-            "type" => "START_TIMER",
-            "duration" => $duration,
-            "mode" => $mode
-        ];
-
-        if (empty($aiResponseText)) {
             $label = ($mode === 'FOCUS') ? 'focus session' : 'break';
-            $aiResponseText = "I have configured and started a {$duration}-minute {$label} for you. Immerse yourself in deep flow.";
+            $actionReplies[] = "Started a {$duration}-minute {$label} for you.";
+            continue;
+        }
+
+        if (preg_match('/\b(pause|hold)\s+(?:the\s+)?(timer|focus|session)\b/i', $c)) {
+            $detectedActions[] = ["type" => "PAUSE_TIMER", "payload" => (object)[]];
+            $actionReplies[] = "Paused the active focus timer.";
+            continue;
+        }
+
+        if (preg_match('/\b(resume|continue|unpause)\s+(?:the\s+)?(timer|focus|session)\b/i', $c)) {
+            $detectedActions[] = ["type" => "RESUME_TIMER", "payload" => (object)[]];
+            $actionReplies[] = "Resumed your focus timer.";
+            continue;
+        }
+
+        if (preg_match('/\b(stop|end|cancel|reset)\s+(?:the\s+)?(timer|focus|session)\b/i', $c)) {
+            $detectedActions[] = ["type" => "STOP_TIMER", "payload" => (object)[]];
+            $actionReplies[] = "Stopped the timer.";
+            continue;
+        }
+
+        if (preg_match('/\b(enable|turn on|activate|start)\s+strict(?:\s+focus)?(?:\s+mode)?\b/i', $c)) {
+            $detectedActions[] = ["type" => "ENABLE_STRICT_MODE", "payload" => (object)[]];
+            $actionReplies[] = "Enabled Strict Focus Mode. Distracting apps are now locked.";
+            continue;
+        }
+
+        if (preg_match('/\b(disable|turn off|deactivate|stop)\s+strict(?:\s+focus)?(?:\s+mode)?\b/i', $c)) {
+            $detectedActions[] = ["type" => "DISABLE_STRICT_MODE", "payload" => (object)[]];
+            $actionReplies[] = "Disabled Strict Focus Mode.";
+            continue;
+        }
+
+        if (preg_match('/\b(clear|delete|remove)\s+(?:all\s+)?completed\s+tasks?\b/i', $c)) {
+            $detectedActions[] = ["type" => "CLEAR_COMPLETED_TASKS", "payload" => (object)[]];
+            $actionReplies[] = "Cleared all completed tasks.";
+            continue;
+        }
+
+        if (preg_match('/\b(complete|finish|done|mark\s+complete|check\s+off)\s+(?:task\s+)?[\'"]?([^\'"]+?)[\'"]?$/i', $c, $mComp)) {
+            if (strpos($cLower, 'habit') === false && strpos($cLower, 'timer') === false) {
+                $t = trim($mComp[1], " \t\n\r\0\x0B.'\"");
+                $detectedActions[] = ["type" => "COMPLETE_TASK", "payload" => ["title" => $t]];
+                $actionReplies[] = "Marked task '{$t}' as completed.";
+                continue;
+            }
+        }
+
+        if (preg_match('/\b(delete|remove)\s+task\s+[\'"]?([^\'"]+?)[\'"]?$/i', $c, $mDelTask)) {
+            $t = trim($mDelTask[1], " \t\n\r\0\x0B.'\"");
+            $detectedActions[] = ["type" => "DELETE_TASK", "payload" => ["title" => $t]];
+            $actionReplies[] = "Deleted task '{$t}'.";
+            continue;
+        }
+
+        if (preg_match('/\b(?:add|create|new|schedule)\s+(?:a\s+)?task\s+(?:named|to|called)?\s*[:"\']?(.+?)[\'"]?$/i', $c, $mTask)) {
+            $taskTitle = trim($mTask[1], " \t\n\r\0\x0B.'\"");
+            $priority = "medium";
+            if (preg_match('/\b(high|urgent|critical|important)\b/i', $c)) {
+                $priority = "high";
+            } elseif (preg_match('/\b(low|minor)\b/i', $c)) {
+                $priority = "low";
+            }
+            $detectedActions[] = [
+                "type" => "CREATE_TASK",
+                "payload" => ["title" => $taskTitle, "priority" => $priority, "category" => "General"]
+            ];
+            $actionReplies[] = "Created task '{$taskTitle}' with {$priority} priority.";
+            continue;
+        }
+
+        if (preg_match('/\b(?:list|show|view|get|what are)\s+(?:my\s+)?(?:pending|overdue|completed|all)?\s*tasks\b/i', $c)) {
+            $filter = "all";
+            if (strpos($cLower, 'pending') !== false) $filter = "pending";
+            elseif (strpos($cLower, 'completed') !== false) $filter = "completed";
+            elseif (strpos($cLower, 'overdue') !== false) $filter = "overdue";
+            elseif (strpos($cLower, 'high') !== false) $filter = "high_priority";
+            $detectedActions[] = ["type" => "LIST_TASKS", "payload" => ["filter" => $filter]];
+            $actionReplies[] = "Here is your {$filter} tasks overview.";
+            continue;
+        }
+
+        if (preg_match('/\b(?:add|create|new|track|build)\s+(?:a\s+)?habit\s+(?:named|to|called)?\s*[:"\']?(.+?)[\'"]?$/i', $c, $mHabit)) {
+            $hTitle = trim($mHabit[1], " \t\n\r\0\x0B.'\"");
+            $detectedActions[] = [
+                "type" => "CREATE_HABIT",
+                "payload" => ["title" => $hTitle, "frequency" => "daily", "icon" => "bolt"]
+            ];
+            $actionReplies[] = "Created the daily habit '{$hTitle}'.";
+            continue;
+        }
+
+        if (preg_match('/\b(check\s+off|log|complete|done)\s+(?:habit\s+)?[\'"]?([^\'"]+?)[\'"]?$/i', $c, $mChkHabit)) {
+            if (strpos($cLower, 'task') === false && strpos($cLower, 'timer') === false) {
+                $hTitle = trim($mChkHabit[1], " \t\n\r\0\x0B.'\"");
+                $detectedActions[] = ["type" => "CHECK_OFF_HABIT", "payload" => ["title" => $hTitle]];
+                $actionReplies[] = "Checked off habit '{$hTitle}' for today.";
+                continue;
+            }
+        }
+
+        if (preg_match('/\b(delete|remove)\s+habit\s+[\'"]?([^\'"]+?)[\'"]?$/i', $c, $mDelHabit)) {
+            $hTitle = trim($mDelHabit[1], " \t\n\r\0\x0B.'\"");
+            $detectedActions[] = ["type" => "DELETE_HABIT", "payload" => ["title" => $hTitle]];
+            $actionReplies[] = "Deleted habit '{$hTitle}'.";
+            continue;
+        }
+
+        if (preg_match('/\b(habit\s+status|check\s+habits|my\s+habits\s+today|how\s+are\s+my\s+habits)\b/i', $c)) {
+            $detectedActions[] = ["type" => "HABIT_STATUS", "payload" => (object)[]];
+            $actionReplies[] = "Here is your habit completion status for today.";
+            continue;
+        }
+
+        if (preg_match('/\b(focus\s+summary|my\s+stats|my\s+analytics|how\s+much\s+did\s+i\s+focus|today\'?s?\s+stats|focus\s+minutes)\b/i', $c)) {
+            $detectedActions[] = ["type" => "GET_FOCUS_SUMMARY", "payload" => (object)[]];
+            $actionReplies[] = "Here is your focus and productivity breakdown.";
+            continue;
+        }
+
+        if (preg_match('/(?:open|show|go to|take me to|navigate to|view)\s+(?:my\s+)?(timer|focus timer|insights|analytics|habits|tasks|task manager|profile|settings|dashboard|home)\b/i', $c, $mNav)) {
+            $dest = strtolower($mNav[1]);
+            $tab = "tasks";
+            if (strpos($dest, 'timer') !== false || strpos($dest, 'focus') !== false) $tab = "focus_timer";
+            elseif (strpos($dest, 'habit') !== false) $tab = "habits";
+            elseif (strpos($dest, 'insight') !== false || strpos($dest, 'analytic') !== false) $tab = "analytics";
+            elseif (strpos($dest, 'profile') !== false || strpos($dest, 'setting') !== false) $tab = "profile";
+            elseif (strpos($dest, 'home') !== false || strpos($dest, 'dash') !== false) $tab = "home";
+
+            $detectedActions[] = ["type" => "NAVIGATE_TAB", "payload" => ["tab" => $tab, "route" => $tab]];
+            $actionReplies[] = "Navigating to {$tab}.";
+            continue;
+        }
+
+        if (preg_match('/\b(export|share|download|save)\s+(?:this\s+)?(?:chat|transcript|conversation)\b/i', $c)) {
+            $detectedActions[] = ["type" => "EXPORT_CHAT", "payload" => (object)[]];
+            $actionReplies[] = "Exporting chat transcript.";
+            continue;
+        }
+
+        if (preg_match('/\b(clear|delete|reset)\s+(?:this\s+)?(?:chat|history|conversation)\b/i', $c)) {
+            $detectedActions[] = ["type" => "CLEAR_CHAT", "payload" => (object)[]];
+            $actionReplies[] = "Cleared chat history.";
+            continue;
         }
     }
-    // 6b. Task Creation Action Detection
-    elseif (preg_match('/(?:add|create|new|schedule)\s+(?:a\s+)?task\s+(?:named|to|called)?\s*[:"\']?(.+?)[\'"]?$/i', $prompt, $mTask)) {
-        $taskTitle = trim($mTask[1]);
-        $priority = "medium";
-        if (preg_match('/\b(high|urgent|critical|important)\b/i', $prompt)) {
-            $priority = "high";
-        } elseif (preg_match('/\b(low|minor)\b/i', $prompt)) {
-            $priority = "low";
-        }
 
-        $detectedAction = [
-            "type" => "CREATE_TASK",
-            "title" => $taskTitle,
-            "priority" => $priority,
-            "category" => "General"
-        ];
-
-        if (empty($aiResponseText)) {
-            $aiResponseText = "I have added '{$taskTitle}' to your task list with {$priority} priority.";
-        }
-    }
-    // 6c. Habit Creation Action Detection
-    elseif (preg_match('/(?:add|create|new|track|build)\s+(?:a\s+)?habit\s+(?:named|to|called)?\s*[:"\']?(.+?)[\'"]?$/i', $prompt, $mHabit)) {
-        $habitTitle = trim($mHabit[1]);
-        $detectedAction = [
-            "type" => "CREATE_HABIT",
-            "title" => $habitTitle,
-            "frequency" => "daily",
-            "icon" => "bolt"
-        ];
-
-        if (empty($aiResponseText)) {
-            $aiResponseText = "I have created the daily habit '{$habitTitle}' for you. Start compounding your streak today!";
-        }
-    }
-    // 6d. Navigation Action Detection
-    elseif (preg_match('/(?:open|show|go to|take me to|navigate to|view)\s+(?:my\s+)?(timer|insights|analytics|habits|tasks|task manager|profile|export|data export|settings)/i', $prompt, $mNav)) {
-        $target = strtolower($mNav[1]);
-        $route = "timer";
-        $screenName = "Timer";
-
-        if (strpos($target, "insight") !== false || strpos($target, "analytics") !== false) {
-            $route = "insights";
-            $screenName = "Insights & Analytics";
-        } elseif (strpos($target, "habit") !== false) {
-            $route = "habits";
-            $screenName = "Habit Tracker";
-        } elseif (strpos($target, "task") !== false) {
-            $route = "tasks";
-            $screenName = "Task Manager";
-        } elseif (strpos($target, "profile") !== false || strpos($target, "settings") !== false) {
-            $route = "profile";
-            $screenName = "Profile & Preferences";
-        } elseif (strpos($target, "export") !== false) {
-            $route = "export_data";
-            $screenName = "Export Data";
-        }
-
-        $detectedAction = [
-            "type" => "NAVIGATE",
-            "route" => $route,
-            "screen_name" => $screenName
-        ];
-
-        if (empty($aiResponseText)) {
-            $aiResponseText = "Navigating to {$screenName}.";
-        }
-    }
-    // 6e. Goal Action Detection
-    elseif (preg_match('/(?:set|change|update)\s+(?:my\s+)?(?:daily\s+)?(?:goal|target)\s+(?:to\s+)?(\d+)\s*(hours?|hrs?|mins?|minutes?)/i', $prompt, $mGoal)) {
-        $amount = (int)$mGoal[1];
-        $isHours = preg_match('/hours?|hrs?/i', $mGoal[2]);
-        $minutes = $isHours ? ($amount * 60) : $amount;
-        $minutes = max(30, min(720, $minutes));
-        $hoursDisplay = round($minutes / 60.0, 1);
-
-        $detectedAction = [
-            "type" => "SET_GOAL",
-            "daily_minutes" => $minutes
-        ];
-
-        if (empty($aiResponseText)) {
-            $aiResponseText = "I have updated your daily focus target to {$hoursDisplay} hours ({$minutes} minutes).";
-        }
+    if (!empty($actionReplies) && empty($aiResponseText)) {
+        $aiResponseText = implode(" ", $actionReplies);
     }
 }
 
-// 6f. Confirmation for action if model produced only the action tag
-if ($detectedAction !== null && empty($aiResponseText)) {
-    $type = strtoupper($detectedAction['type'] ?? '');
-    switch ($type) {
-        case 'START_TIMER':
-            $duration = (int)($detectedAction['duration'] ?? 25);
-            $mode = ($detectedAction['mode'] ?? 'FOCUS') === 'FOCUS' ? 'focus session' : 'break';
-            $aiResponseText = "I have configured and started a {$duration}-minute {$mode} for you. Immerse yourself in deep flow.";
-            break;
-        case 'CREATE_TASK':
-            $taskTitle = htmlspecialchars($detectedAction['title'] ?? 'Task');
-            $priority = htmlspecialchars($detectedAction['priority'] ?? 'medium');
-            $aiResponseText = "I have added '{$taskTitle}' to your task list with {$priority} priority.";
-            break;
-        case 'CREATE_HABIT':
-            $habitTitle = htmlspecialchars($detectedAction['title'] ?? 'Habit');
-            $aiResponseText = "I have created the daily habit '{$habitTitle}' for you. Start compounding your streak today.";
-            break;
-        case 'NAVIGATE':
-            $screenName = htmlspecialchars($detectedAction['screen_name'] ?? $detectedAction['route'] ?? 'screen');
-            $aiResponseText = "Navigating to {$screenName}.";
-            break;
-        case 'SET_GOAL':
-            $minutes = (int)($detectedAction['daily_minutes'] ?? 240);
-            $hoursDisplay = round($minutes / 60.0, 1);
-            $aiResponseText = "I have updated your daily focus target to {$hoursDisplay} hours ({$minutes} minutes).";
-            break;
-    }
-}
-
-// 7. Fallback ONLY when AI reasoning engine is unreachable
 if (empty($aiResponseText)) {
-    if (!empty($curlError) || $httpCode !== 200) {
-        $aiResponseText = "I am Groot, your AI collaborator inside FocusFlow. I am currently unable to reach my reasoning engine (port 8000). Please ensure the AI service is active.";
-    } else {
-        $aiResponseText = "I am Groot, your AI collaborator inside FocusFlow. I am here to assist with your productivity, tasks, and questions.";
-    }
+    $aiResponseText = "I am Groot, your AI collaborator inside FocusFlow. I am here to assist with your productivity, tasks, and questions.";
 }
 
-// Strictly purge emojis
 $aiResponseText = preg_replace('/[\x{10000}-\x{10FFFF}\x{2600}-\x{27BF}\x{2300}-\x{23FF}\x{2B50}\x{2B55}]/u', '', $aiResponseText);
-$aiResponseText = trim($aiResponseText);
+$aiResponseText = trim(html_entity_decode($aiResponseText, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
 
 echo json_encode([
     "status" => "success",
     "success" => true,
+    "reply" => $aiResponseText,
     "insight" => $aiResponseText,
+    "response" => $aiResponseText,
     "message" => $aiResponseText,
-    "action" => $detectedAction,
+    "actions" => $detectedActions,
+    "action" => !empty($detectedActions) ? $detectedActions[0] : null,
     "timestamp" => date('Y-m-d H:i:s')
 ]);
 exit();
