@@ -9,12 +9,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-$host = "localhost";
-$user = "root";
-$pass = "";
-$db = "flow";
+$host = getenv('DB_HOST') ?: "localhost";
+$port = intval(getenv('DB_PORT') ?: 3306);
+$user = getenv('DB_USER') ?: "root";
+$pass = getenv('DB_PASS') !== false ? getenv('DB_PASS') : "";
+$db = getenv('DB_NAME') ?: "flow";
 
-$conn = new mysqli($host, $user, $pass, $db);
+$conn = new mysqli($host, $user, $pass, $db, $port);
 if ($conn->connect_error) {
     if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($_GET['api'])) {
         http_response_code(500);

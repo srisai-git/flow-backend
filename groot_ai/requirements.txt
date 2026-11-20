@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+requests
+google-generativeai
+torch
+transformers
+peft
+accelerate

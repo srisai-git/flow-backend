@@ -15,13 +15,14 @@ if (php_sapi_name() !== 'cli') {
     }
 }
 
-$host = "localhost";
-$db_name = "flow";
-$username = "root";
-$password = "";
+$host = getenv('DB_HOST') ?: "localhost";
+$port = getenv('DB_PORT') ?: "3306";
+$username = getenv('DB_USER') ?: "root";
+$password = getenv('DB_PASS') !== false ? getenv('DB_PASS') : "";
+$db_name = getenv('DB_NAME') ?: "flow";
 
 try {
-    $conn = new PDO("mysql:host=$host;dbname=$db_name;charset=utf8mb4", $username, $password, [
+    $conn = new PDO("mysql:host=$host;port=$port;dbname=$db_name;charset=utf8mb4", $username, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false

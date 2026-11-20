@@ -1,11 +1,12 @@
 import os
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
 import html
 import re
 import time
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Union
+from dotenv import load_dotenv
+import requests
+import google.generativeai as genai
 import torch
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
+
+load_dotenv()
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+if GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+    except Exception:
+        pass
 
 app = FastAPI(title="Groot AI Engine")
 
@@ -50,23 +60,32 @@ base_model_id = "Qwen/Qwen2.5-0.5B-Instruct"
 script_dir = os.path.dirname(os.path.abspath(__file__))
 adapter_path = os.path.join(script_dir, "groot_model")
 
-tokenizer = AutoTokenizer.from_pretrained(base_model_id)
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
+tokenizer = None
+model = None
+use_cuda = False
 
-use_cuda = torch.cuda.is_available()
-base_model = AutoModelForCausalLM.from_pretrained(
-    base_model_id,
-    torch_dtype=torch.float16 if use_cuda else torch.float32,
-    device_map="auto" if use_cuda else None
-)
+try:
+    tokenizer = AutoTokenizer.from_pretrained(base_model_id)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
-if os.path.exists(adapter_path):
-    model = PeftModel.from_pretrained(base_model, adapter_path)
-else:
-    model = base_model
+    use_cuda = torch.cuda.is_available()
+    base_model = AutoModelForCausalLM.from_pretrained(
+        base_model_id,
+        torch_dtype=torch.float16 if use_cuda else torch.float32,
+        device_map="auto" if use_cuda else None
+    )
 
-model.eval()
+    if os.path.exists(adapter_path):
+        model = PeftModel.from_pretrained(base_model, adapter_path)
+    else:
+        model = base_model
+
+    model.eval()
+except Exception:
+    tokenizer = None
+    model = None
+    use_cuda = False
 
 SYSTEM_PERSONA = (
     "You are Groot, the dedicated in-app productivity, academic, coding, and focus coaching intelligence for FocusFlow.\n\n"
@@ -341,28 +360,44 @@ def build_prompt_from_messages(messages: List[Union[Message, dict]]) -> str:
     return "\n".join(parts)
 
 def generate_response(prompt_text: str, max_tokens: int = 220, temperature: float = 0.4, top_p: float = 0.9) -> str:
-    inputs = tokenizer(prompt_text, return_tensors="pt")
-    if use_cuda:
-        inputs = {k: v.to(model.device) for k, v in inputs.items()}
-    
-    with torch.inference_mode():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=min(max_tokens, 300),
-            temperature=temperature,
-            top_p=top_p,
-            repetition_penalty=1.12,
-            pad_token_id=tokenizer.eos_token_id,
-            do_sample=True if temperature > 0 else False,
-            early_stopping=True
-        )
-    
-    generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
-    reply = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
-    reply = reply.replace("<|im_end|>", "").strip()
-    reply = emoji_pattern.sub('', reply).strip()
-    reply = html.unescape(reply)
-    return reply
+    if model is not None and tokenizer is not None:
+        try:
+            inputs = tokenizer(prompt_text, return_tensors="pt")
+            if use_cuda:
+                inputs = {k: v.to(model.device) for k, v in inputs.items()}
+            with torch.inference_mode():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=min(max_tokens, 300),
+                    temperature=temperature,
+                    top_p=top_p,
+                    repetition_penalty=1.12,
+                    pad_token_id=tokenizer.eos_token_id,
+                    do_sample=True if temperature > 0 else False,
+                    early_stopping=True
+                )
+            generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+            reply = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+            reply = reply.replace("<|im_end|>", "").strip()
+            reply = emoji_pattern.sub('', reply).strip()
+            reply = html.unescape(reply)
+            if reply:
+                return reply
+        except Exception:
+            pass
+
+    if GEMINI_API_KEY:
+        try:
+            gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+            resp = gemini_model.generate_content(prompt_text)
+            if resp and resp.text:
+                reply = resp.text.strip()
+                reply = emoji_pattern.sub('', reply).strip()
+                return html.unescape(reply)
+        except Exception:
+            pass
+
+    return "I am Groot, your focus and productivity companion. How can I assist you with your tasks today?"
 
 @app.get("/")
 @app.get("/health")
@@ -758,13 +793,6 @@ def focus_coaching(req: FocusCoachingRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    import socket
-    host = "127.0.0.1"
-    try:
-        test_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        test_sock.bind(("0.0.0.0", 8000))
-        test_sock.close()
-        host = "0.0.0.0"
-    except Exception:
-        host = "127.0.0.1"
-    uvicorn.run(app, host=host, port=8000)
+    host = "0.0.0.0"
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host=host, port=port)

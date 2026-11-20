@@ -1,0 +1,9 @@
+.git
+.env
+.env.*
+!.env.example
+groot_ai/__pycache__
+groot_ai/groot_checkpoints
+__pycache__
+*.pyc
+uploads/
