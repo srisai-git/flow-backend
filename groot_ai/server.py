@@ -17,12 +17,12 @@ from peft import PeftModel
 
 load_dotenv()
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 if GEMINI_API_KEY:
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[GrootAI] Initial Gemini configuration error: {e}")
 
 app = FastAPI(title="Groot AI Engine")
 
@@ -321,6 +321,9 @@ class SimpleChatRequest(BaseModel):
     query: Optional[str] = Field(None, max_length=4000)
     text: Optional[str] = Field(None, max_length=4000)
 
+    class Config:
+        extra = "allow"
+
 class ChatRequest(BaseModel):
     message: Optional[str] = Field(None, max_length=4000)
     prompt: Optional[str] = Field(None, max_length=4000)
@@ -328,6 +331,9 @@ class ChatRequest(BaseModel):
     text: Optional[str] = Field(None, max_length=4000)
     history: Optional[List[Any]] = None
     user_id: Optional[int] = 1
+
+    class Config:
+        extra = "allow"
 
 class StudyPlanRequest(BaseModel):
     subject: Optional[str] = None
@@ -360,6 +366,26 @@ def build_prompt_from_messages(messages: List[Union[Message, dict]]) -> str:
     return "\n".join(parts)
 
 def generate_response(prompt_text: str, max_tokens: int = 220, temperature: float = 0.4, top_p: float = 0.9) -> str:
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip() or GEMINI_API_KEY
+    if api_key:
+        candidate_models = ["gemini-2.5-flash", "gemini-2.5-flash-preview", "gemini-1.5-flash"]
+        for model_name in candidate_models:
+            try:
+                genai.configure(api_key=api_key)
+                gemini_model = genai.GenerativeModel(model_name)
+                resp = gemini_model.generate_content(prompt_text)
+                if resp and resp.text:
+                    reply = resp.text.strip()
+                    reply = reply.replace("<|im_end|>", "").replace("<|im_start|>", "").strip()
+                    reply = emoji_pattern.sub('', reply).strip()
+                    clean_reply = html.unescape(reply)
+                    if clean_reply:
+                        return clean_reply
+            except Exception as e:
+                print(f"[GrootAI] Gemini API error with model '{model_name}': {e}")
+    else:
+        print("[GrootAI] GEMINI_API_KEY is not set or empty in environment.")
+
     if model is not None and tokenizer is not None:
         try:
             inputs = tokenizer(prompt_text, return_tensors="pt")
@@ -378,24 +404,13 @@ def generate_response(prompt_text: str, max_tokens: int = 220, temperature: floa
                 )
             generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
             reply = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
-            reply = reply.replace("<|im_end|>", "").strip()
+            reply = reply.replace("<|im_end|>", "").replace("<|im_start|>", "").strip()
             reply = emoji_pattern.sub('', reply).strip()
             reply = html.unescape(reply)
             if reply:
                 return reply
-        except Exception:
-            pass
-
-    if GEMINI_API_KEY:
-        try:
-            gemini_model = genai.GenerativeModel("gemini-1.5-flash")
-            resp = gemini_model.generate_content(prompt_text)
-            if resp and resp.text:
-                reply = resp.text.strip()
-                reply = emoji_pattern.sub('', reply).strip()
-                return html.unescape(reply)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[GrootAI] Local model generation error: {e}")
 
     return "I am Groot, your focus and productivity companion. How can I assist you with your tasks today?"
 
@@ -404,7 +419,24 @@ def generate_response(prompt_text: str, max_tokens: int = 220, temperature: floa
 def health():
     return {"status": "ok", "service": "Groot AI Engine", "ready": True}
 
+@app.get("/chat")
+@app.get("/groot/chat")
+def chat_endpoint_get():
+    msg = "I am Groot, your focus and productivity companion."
+    return {
+        "status": "success",
+        "success": True,
+        "reply": msg,
+        "response": msg,
+        "message": msg,
+        "text": msg,
+        "insight": msg,
+        "actions": [],
+        "action": None
+    }
+
 @app.post("/chat")
+@app.post("/groot/chat")
 def chat_endpoint(req: ChatRequest):
     user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
     user_msg = html.unescape(user_msg.strip())
@@ -415,8 +447,9 @@ def chat_endpoint(req: ChatRequest):
             "success": True,
             "reply": ENGLISH_REFUSAL_MESSAGE,
             "response": ENGLISH_REFUSAL_MESSAGE,
-            "insight": ENGLISH_REFUSAL_MESSAGE,
             "message": ENGLISH_REFUSAL_MESSAGE,
+            "text": ENGLISH_REFUSAL_MESSAGE,
+            "insight": ENGLISH_REFUSAL_MESSAGE,
             "actions": [],
             "action": None
         }
@@ -426,8 +459,9 @@ def chat_endpoint(req: ChatRequest):
             "success": True,
             "reply": PHYSICAL_DECLINE_MESSAGE,
             "response": PHYSICAL_DECLINE_MESSAGE,
-            "insight": PHYSICAL_DECLINE_MESSAGE,
             "message": PHYSICAL_DECLINE_MESSAGE,
+            "text": PHYSICAL_DECLINE_MESSAGE,
+            "insight": PHYSICAL_DECLINE_MESSAGE,
             "actions": [],
             "action": None
         }
@@ -437,8 +471,9 @@ def chat_endpoint(req: ChatRequest):
             "success": True,
             "reply": DECLINE_MESSAGE,
             "response": DECLINE_MESSAGE,
-            "insight": DECLINE_MESSAGE,
             "message": DECLINE_MESSAGE,
+            "text": DECLINE_MESSAGE,
+            "insight": DECLINE_MESSAGE,
             "actions": [],
             "action": None
         }
@@ -451,8 +486,9 @@ def chat_endpoint(req: ChatRequest):
             "success": True,
             "reply": unescaped_reply,
             "response": unescaped_reply,
-            "insight": unescaped_reply,
             "message": unescaped_reply,
+            "text": unescaped_reply,
+            "insight": unescaped_reply,
             "actions": actions,
             "action": actions[0] if actions else None,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
@@ -471,8 +507,9 @@ def chat_endpoint(req: ChatRequest):
         "success": True,
         "reply": unescaped_llm_reply,
         "response": unescaped_llm_reply,
-        "insight": unescaped_llm_reply,
         "message": unescaped_llm_reply,
+        "text": unescaped_llm_reply,
+        "insight": unescaped_llm_reply,
         "actions": actions,
         "action": actions[0] if actions else None,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
@@ -584,6 +621,7 @@ def chat_completions(req: ChatCompletionRequest):
     }
 
 @app.post("/ask_groot")
+@app.post("/ask_groot.php")
 def ask_groot(req: SimpleChatRequest):
     user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
     user_msg = html.unescape(user_msg.strip())
@@ -594,8 +632,9 @@ def ask_groot(req: SimpleChatRequest):
             "success": True,
             "response": ENGLISH_REFUSAL_MESSAGE,
             "reply": ENGLISH_REFUSAL_MESSAGE,
-            "insight": ENGLISH_REFUSAL_MESSAGE,
             "message": ENGLISH_REFUSAL_MESSAGE,
+            "text": ENGLISH_REFUSAL_MESSAGE,
+            "insight": ENGLISH_REFUSAL_MESSAGE,
             "actions": [],
             "action": None
         }
@@ -605,8 +644,9 @@ def ask_groot(req: SimpleChatRequest):
             "success": True,
             "response": PHYSICAL_DECLINE_MESSAGE,
             "reply": PHYSICAL_DECLINE_MESSAGE,
-            "insight": PHYSICAL_DECLINE_MESSAGE,
             "message": PHYSICAL_DECLINE_MESSAGE,
+            "text": PHYSICAL_DECLINE_MESSAGE,
+            "insight": PHYSICAL_DECLINE_MESSAGE,
             "actions": [],
             "action": None
         }
@@ -616,8 +656,9 @@ def ask_groot(req: SimpleChatRequest):
             "success": True,
             "response": DECLINE_MESSAGE,
             "reply": DECLINE_MESSAGE,
-            "insight": DECLINE_MESSAGE,
             "message": DECLINE_MESSAGE,
+            "text": DECLINE_MESSAGE,
+            "insight": DECLINE_MESSAGE,
             "actions": [],
             "action": None
         }
@@ -630,8 +671,9 @@ def ask_groot(req: SimpleChatRequest):
             "success": True,
             "response": unescaped_reply,
             "reply": unescaped_reply,
-            "insight": unescaped_reply,
             "message": unescaped_reply,
+            "text": unescaped_reply,
+            "insight": unescaped_reply,
             "actions": actions,
             "action": actions[0] if actions else None,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
@@ -649,8 +691,9 @@ def ask_groot(req: SimpleChatRequest):
         "success": True,
         "response": unescaped_reply,
         "reply": unescaped_reply,
-        "insight": unescaped_reply,
         "message": unescaped_reply,
+        "text": unescaped_reply,
+        "insight": unescaped_reply,
         "actions": actions,
         "action": actions[0] if actions else None,
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
@@ -666,14 +709,14 @@ def generate(req: dict):
     user_msg = html.unescape(user_msg.strip())
     
     if user_msg and PHYSICAL_ACTION_RE.search(user_msg):
-        return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE, "actions": [], "action": None}
+        return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE, "text": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "actions": [], "action": None}
     if user_msg and OFF_TOPIC_RE.search(user_msg):
-        return {"status": "success", "success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "message": DECLINE_MESSAGE, "actions": [], "action": None}
+        return {"status": "success", "success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "message": DECLINE_MESSAGE, "text": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "actions": [], "action": None}
 
     actions, extracted_reply = extract_actions_and_reply(user_msg)
     if actions and extracted_reply:
         unescaped_reply = html.unescape(extracted_reply)
-        return {"status": "success", "success": True, "response": unescaped_reply, "reply": unescaped_reply, "insight": unescaped_reply, "message": unescaped_reply, "actions": actions, "action": actions[0] if actions else None}
+        return {"status": "success", "success": True, "response": unescaped_reply, "reply": unescaped_reply, "message": unescaped_reply, "text": unescaped_reply, "insight": unescaped_reply, "actions": actions, "action": actions[0] if actions else None}
 
     if "messages" in req and isinstance(req["messages"], list):
         msg_objs = [Message(**m) if isinstance(m, dict) else m for m in req["messages"]]
@@ -687,7 +730,7 @@ def generate(req: dict):
     
     reply = generate_response(prompt_text, max_tokens=220, temperature=0.4)
     unescaped_reply = html.unescape(reply)
-    return {"status": "success", "success": True, "response": unescaped_reply, "reply": unescaped_reply, "insight": unescaped_reply, "message": unescaped_reply, "actions": actions, "action": actions[0] if actions else None}
+    return {"status": "success", "success": True, "response": unescaped_reply, "reply": unescaped_reply, "message": unescaped_reply, "text": unescaped_reply, "insight": unescaped_reply, "actions": actions, "action": actions[0] if actions else None}
 
 class TaskBreakdownRequest(BaseModel):
     task_title: Optional[str] = None
