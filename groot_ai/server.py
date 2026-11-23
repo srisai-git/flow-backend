@@ -145,27 +145,58 @@ def extract_actions_and_reply(user_query: str) -> Tuple[List[Dict[str, Any]], Op
     for clause in sub_clauses:
         c_lower = clause.lower()
         
-        m_timer = re.search(r'\b(?:start|set|run|begin|launch|activate)\s+(?:a\s+)?(?:(\d+)\s*(?:min|minute|minutes|m)?)?\s*(focus|timer|session|break|pomodoro)?', clause, re.IGNORECASE)
-        m_timer2 = re.search(r'(\d+)\s*(?:min|minute|minutes|m)\s*(focus|timer|session|break|pomodoro)', clause, re.IGNORECASE)
-        if (m_timer and (m_timer.group(1) or m_timer.group(2))) or m_timer2:
-            mins = 25
-            if m_timer and m_timer.group(1):
-                mins = int(m_timer.group(1))
-            elif m_timer2:
-                mins = int(m_timer2.group(1))
-            mode = "FOCUS"
-            if "break" in c_lower:
-                mode = "LONG_BREAK" if mins >= 15 else "SHORT_BREAK"
-                if mins == 25:
-                    mins = 5
-            mins = max(1, min(180, mins))
-            actions.append({
-                "type": "START_FOCUS_TIMER",
-                "payload": {"duration": mins, "mode": mode}
-            })
-            mode_label = "focus session" if mode == "FOCUS" else "break"
-            replies.append(f"Started a {mins}-minute {mode_label} for you.")
+        if re.search(r'\b(?:lock(?:ed)?\s+in|locking\s+in)\b', clause, re.IGNORECASE):
+            actions.append({"type": "START_FOCUS_TIMER", "payload": {"duration": 45, "mode": "FOCUS"}})
+            replies.append("Locking in right now. Full focus mode activated - zero distractions. Let's get to work.")
             continue
+            
+        if re.search(r'\b(?:i\'?m\s+cooked|feeling\s+cooked|cooked)\b', clause, re.IGNORECASE):
+            actions.append({"type": "START_FOCUS_TIMER", "payload": {"duration": 15, "mode": "LONG_BREAK"}})
+            replies.append("You are not cooked, just experiencing cognitive fatigue. Take a 15-minute recovery breather to reset your brain.")
+            continue
+            
+        if re.search(r'\b(?:fr|for\s+real|no\s+cap)\b', clause, re.IGNORECASE):
+            actions.append({"type": "CHAT", "payload": {"reply": "For real, no cap. Let's keep the streak compounding."}})
+            replies.append("For real, no cap. Let's keep the streak compounding.")
+            continue
+            
+        if re.search(r'\b(?:bet|say\s+less)\b', clause, re.IGNORECASE):
+            actions.append({"type": "CHAT", "payload": {"reply": "Bet. Say less - I got you covered."}})
+            replies.append("Bet. Say less - I got you covered.")
+            continue
+            
+        if re.search(r'\b(?:bye\s+byee?|bye\b|goodbye|cya)\b', clause, re.IGNORECASE):
+            actions.append({"type": "CHAT", "payload": {"reply": "Bye byee! Great focus work today. Lock in again soon!"}})
+            replies.append("Bye byee! Great focus work today. Lock in again soon!")
+            continue
+
+        if "task" not in c_lower and "habit" not in c_lower:
+            m_hour = re.search(r'(\d+)\s*(?:hours?|hrs?|h)\b', clause, re.IGNORECASE)
+            m_min = re.search(r'(\d+)\s*(?:mins?|minutes?|m)\b', clause, re.IGNORECASE)
+            m_timer = re.search(r'\b(?:start|set|run|begin|launch|activate)\s+(?:a\s+)?(?:(\d+)\s*)?(focus|timer|session|break|pomodoro)?\b', clause, re.IGNORECASE)
+            has_timer_keyword = any(k in c_lower for k in ["timer", "focus", "break", "pomodoro", "session"])
+            
+            if m_hour or m_min or (m_timer and has_timer_keyword):
+                mins = 25
+                if m_hour:
+                    mins = int(m_hour.group(1)) * 60
+                elif m_min:
+                    mins = int(m_min.group(1))
+                elif m_timer and m_timer.group(1):
+                    mins = int(m_timer.group(1))
+                mode = "FOCUS"
+                if "break" in c_lower:
+                    mode = "LONG_BREAK" if mins >= 15 else "SHORT_BREAK"
+                    if mins == 25 and not m_min and not m_hour:
+                        mins = 5
+                mins = max(1, min(720, mins))
+                actions.append({
+                    "type": "START_FOCUS_TIMER",
+                    "payload": {"duration": mins, "mode": mode}
+                })
+                mode_label = "focus session" if mode == "FOCUS" else "break"
+                replies.append(f"Started a {mins}-minute {mode_label} for you.")
+                continue
             
         if re.search(r'\b(?:pause|hold)\s+(?:the\s+)?(?:timer|focus|session)\b', clause, re.IGNORECASE):
             actions.append({"type": "PAUSE_TIMER", "payload": {}})
@@ -299,6 +330,25 @@ def extract_actions_and_reply(user_query: str) -> Tuple[List[Dict[str, Any]], Op
                 tab = "home"
             actions.append({"type": "NAVIGATE_TAB", "payload": {"tab": tab, "route": tab}})
             replies.append(f"Navigating to {tab}.")
+            continue
+            
+        m_name = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?name\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
+        if m_name:
+            new_name = m_name.group(1).strip().strip(".'\"")
+            actions.append({"type": "UPDATE_PROFILE", "payload": {"name": new_name}})
+            replies.append(f"Updated your profile name to '{new_name}'.")
+            continue
+            
+        m_bio = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?bio\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
+        if m_bio:
+            new_bio = m_bio.group(1).strip().strip(".'\"")
+            actions.append({"type": "UPDATE_PROFILE", "payload": {"bio": new_bio}})
+            replies.append("Updated your profile bio.")
+            continue
+
+        if re.search(r'\b(?:export|download|backup)\s+(?:all\s+)?(?:productivity\s+)?(?:data|history|records)\b', clause, re.IGNORECASE):
+            actions.append({"type": "EXPORT_DATA", "payload": {}})
+            replies.append("Exporting your complete productivity history.")
             continue
             
         if re.search(r'\b(?:export|share|download|save)\s+(?:this\s+)?(?:chat|transcript|conversation)\b', clause, re.IGNORECASE):
