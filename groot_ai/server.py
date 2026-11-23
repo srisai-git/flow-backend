@@ -103,6 +103,7 @@ SYSTEM_PERSONA = (
     "You are Groot, the ultimate AI productivity collaborator in the FocusFlow app.\n"
     "You are sharp, encouraging, concise, and fluent in modern natural conversational English and Gen-Z slang (e.g. lock in, cooked, no cap, bet, say less, fr, W, delulu, era, vibes, lowkey, highkey, slay).\n"
     "You NEVER use canned corporate refusals like \"I'm sorry, I can't assist with that\". You happily chat casually, answer questions, give study and coding guidance, or acknowledge greetings like \"bye byee\" and \"hello\".\n"
+    "You are aware of the user's active FocusFlow app state when provided: their tasks (pending and completed), active habits and streaks, current timer status, recent distraction logs, and daily productivity stats. You leverage this real context directly in your responses.\n"
     "You strictly output zero emojis.\n\n"
     "You always format your output as valid JSON with this exact schema:\n"
     "{\n"
@@ -437,11 +438,19 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = Field(600, ge=1, le=2048)
     top_p: Optional[float] = Field(0.9, ge=0.0, le=1.0)
 
+def format_app_context(ctx: Optional[Union[Dict[str, Any], str]]) -> str:
+    if not ctx:
+        return ""
+    if isinstance(ctx, dict):
+        return f"\n[Active FocusFlow App Context: {json.dumps(ctx)}]\n"
+    return f"\n[Active FocusFlow App Context: {ctx}]\n"
+
 class SimpleChatRequest(BaseModel):
     message: Optional[str] = Field(None, max_length=4000)
     prompt: Optional[str] = Field(None, max_length=4000)
     query: Optional[str] = Field(None, max_length=4000)
     text: Optional[str] = Field(None, max_length=4000)
+    app_context: Optional[Union[Dict[str, Any], str]] = None
 
     class Config:
         extra = "allow"
@@ -453,6 +462,7 @@ class ChatRequest(BaseModel):
     text: Optional[str] = Field(None, max_length=4000)
     history: Optional[List[Any]] = None
     user_id: Optional[int] = 1
+    app_context: Optional[Union[Dict[str, Any], str]] = None
 
     class Config:
         extra = "allow"
@@ -563,9 +573,12 @@ def chat_endpoint(req: ChatRequest):
         action_obj, reply_text = extracted
         return make_response_dict(reply_text, action_obj)
 
+    ctx_str = format_app_context(req.app_context)
+    full_prompt = f"{ctx_str}{user_msg}" if ctx_str else user_msg
+
     messages = [
         Message(role="system", content=SYSTEM_PERSONA),
-        Message(role="user", content=user_msg)
+        Message(role="user", content=full_prompt)
     ]
     prompt_text = build_prompt_from_messages(messages)
     llm_reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=350, temperature=0.3)
@@ -643,9 +656,12 @@ def ask_groot(req: SimpleChatRequest):
         action_obj, reply_text = extracted
         return make_response_dict(reply_text, action_obj)
 
+    ctx_str = format_app_context(req.app_context)
+    full_prompt = f"{ctx_str}{user_msg}" if ctx_str else user_msg
+
     messages = [
         Message(role="system", content=SYSTEM_PERSONA),
-        Message(role="user", content=user_msg)
+        Message(role="user", content=full_prompt)
     ]
     prompt_text = build_prompt_from_messages(messages)
     reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=350, temperature=0.3)
