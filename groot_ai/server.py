@@ -65,16 +65,27 @@ model = None
 use_cuda = False
 
 try:
-    tokenizer = AutoTokenizer.from_pretrained(base_model_id)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(base_model_id, local_files_only=True)
+    except Exception:
+        tokenizer = AutoTokenizer.from_pretrained(base_model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     use_cuda = torch.cuda.is_available()
-    base_model = AutoModelForCausalLM.from_pretrained(
-        base_model_id,
-        torch_dtype=torch.float16 if use_cuda else torch.float32,
-        device_map="auto" if use_cuda else None
-    )
+    try:
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_model_id,
+            torch_dtype=torch.float16 if use_cuda else torch.float32,
+            device_map="auto" if use_cuda else None,
+            local_files_only=True
+        )
+    except Exception:
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_model_id,
+            torch_dtype=torch.float16 if use_cuda else torch.float32,
+            device_map="auto" if use_cuda else None
+        )
 
     if os.path.exists(adapter_path):
         model = PeftModel.from_pretrained(base_model, adapter_path)
