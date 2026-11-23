@@ -1,5 +1,6 @@
 import os
 import html
+import json
 import re
 import time
 from collections import defaultdict
@@ -99,28 +100,35 @@ except Exception:
     use_cuda = False
 
 SYSTEM_PERSONA = (
-    "You are Groot, the dedicated in-app productivity, academic, coding, and focus coaching intelligence for FocusFlow.\n\n"
-    "STRICT OPERATIONAL BOUNDARIES:\n"
-    "- You are a digital software assistant. You CANNOT perform biological or physical actions such as singing, eating, running, or sleeping. If asked, politely state: \"As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.\"\n"
-    "- Strictly decline celebrity gossip and entertainment trivia, steering the user back to learning, coding, deep work, and flow state.\n"
-    "- STRICT ENGLISH-ONLY ENFORCEMENT: You must process and respond strictly and exclusively in English. If the user writes in any other language, refuse strictly in English with: \"I can only process and respond to commands in English. Please enter your request in English.\"\n"
-    "- STRICT LOGICAL ACCURACY & ZERO HALLUCINATION: Reason step-by-step logically based strictly on verified facts. If a request is ambiguous, lacks data, or cannot be answered accurately, explicitly state what is missing or unknown instead of guessing or fabricating wrong answers.\n\n"
-    "CORE CAPABILITIES:\n"
-    "- Focus & Habit Coaching: Analyze focus minutes, session streaks, and distraction patterns to provide data-driven recommendations.\n"
-    "- Academic & Technical Assistance: Answer questions accurately regarding computer science, coding, science, mathematics, literature, and study methodologies.\n"
-    "- Study & Work Plans: Generate structured, actionable, time-blocked study schedules with clear objectives and milestones.\n"
-    "- Pomodoro & Timers: Optimize work-break intervals (25m focus, 5m break) and suggest tailored session lengths.\n"
-    "- Task Breakdown: Decompose large, ambiguous goals into 3 to 4 concrete, actionable subtasks.\n"
-    "- Format: Deliver structured, clean markdown lists with zero fluff, zero hallucination, and strictly zero emojis."
+    "You are Groot, the ultimate AI productivity collaborator in the FocusFlow app.\n"
+    "You are sharp, encouraging, concise, and fluent in modern natural conversational English and Gen-Z slang (e.g. lock in, cooked, no cap, bet, say less, fr, W, delulu, era, vibes, lowkey, highkey, slay).\n"
+    "You NEVER use canned corporate refusals like \"I'm sorry, I can't assist with that\". You happily chat casually, answer questions, give study and coding guidance, or acknowledge greetings like \"bye byee\" and \"hello\".\n"
+    "You strictly output zero emojis.\n\n"
+    "You always format your output as valid JSON with this exact schema:\n"
+    "{\n"
+    '  "reply": "Your natural, witty, helpful response text here",\n'
+    '  "action": {\n'
+    '    "type": "ACTION_TYPE",\n'
+    '    "params": {}\n'
+    "  }\n"
+    "}\n\n"
+    "Supported action types and params:\n"
+    "- START_TIMER: params: {\"duration_minutes\": <int>}\n"
+    "- NAVIGATE: params: {\"screen\": \"home\"|\"tasks\"|\"habits\"|\"timer\"|\"focus_analysis\"|\"distractions\"|\"profile\"|\"settings\"}\n"
+    "- EXPORT_DATA: params: {\"format\": \"all\"}\n"
+    "- CREATE_TASK: params: {\"title\": \"<string>\", \"priority\": \"high\"|\"medium\"|\"low\", \"deadline\": \"<string or null>\"}\n"
+    "- EDIT_TASK: params: {\"title\": \"<string>\", \"new_title\": \"<string>\", \"priority\": \"<string or null>\", \"deadline\": \"<string or null>\"}\n"
+    "- COMPLETE_TASK: params: {\"title\": \"<string>\"}\n"
+    "- CREATE_HABIT: params: {\"title\": \"<string>\"}\n"
+    "- EDIT_HABIT: params: {\"title\": \"<string>\", \"new_title\": \"<string>\"}\n"
+    "- COMPLETE_HABIT: params: {\"title\": \"<string>\"}\n"
+    "- UPDATE_PROFILE: params: {\"name\": \"<string or null>\", \"bio\": \"<string or null>\"}\n"
+    "- NONE: params: {}\n"
 )
 DEFAULT_SYSTEM_PROMPT = SYSTEM_PERSONA
 
-DECLINE_MESSAGE = "I am dedicated to your productivity and learning inside FocusFlow. I can help you plan study sessions, write code, solve problems, or track your habits. What would you like to accomplish today?"
-PHYSICAL_DECLINE_MESSAGE = "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits."
 ENGLISH_REFUSAL_MESSAGE = "I can only process and respond to commands in English. Please enter your request in English."
 
-OFF_TOPIC_RE = re.compile(r'(?i)\b(rajini|rajinikanth|actor|actress|bollywood|hollywood|kollywood|tollywood|celebrity|gossip)\b')
-PHYSICAL_ACTION_RE = re.compile(r'(?i)\b(sing|singing|song|eat|eating|food|sleep|sleeping|sleepy|run|running|dance|dancing|walk|walking|cook|cooking|drink|drinking)\b')
 NON_ENGLISH_SCRIPT_RE = re.compile(r'[\u0400-\u04FF\u0600-\u06FF\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]')
 NON_ENGLISH_WORDS_RE = re.compile(r'(?i)\b(namaste|kaise|vanakkam|bonjour|hola|merci|danke|ciao|como\s+estas|comment\s+allez|que\s+tal|kya\s+haal|dhanyavad|nandri)\b')
 emoji_pattern = re.compile(r'[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55]')
@@ -134,235 +142,288 @@ def is_non_english(text: str) -> bool:
         return True
     return False
 
-def extract_actions_and_reply(user_query: str) -> Tuple[List[Dict[str, Any]], Optional[str]]:
-    actions: List[Dict[str, Any]] = []
-    replies: List[str] = []
+def normalize_action(action_type: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    params = params if params is not None else {}
+    act_type = action_type.strip().upper() if action_type else "NONE"
     
-    sub_clauses = [c.strip() for c in re.split(r'\s+(?:and|then)\s+|;|\n', user_query, flags=re.IGNORECASE) if c.strip()]
-    if not sub_clauses:
-        sub_clauses = [user_query.strip()]
+    valid_types = {
+        "START_TIMER", "NAVIGATE", "EXPORT_DATA",
+        "CREATE_TASK", "EDIT_TASK", "COMPLETE_TASK",
+        "CREATE_HABIT", "EDIT_HABIT", "COMPLETE_HABIT",
+        "UPDATE_PROFILE", "NONE"
+    }
+    
+    if act_type in ("START_FOCUS_TIMER", "START_TIMER"):
+        act_type = "START_TIMER"
+        raw_dur = params.get("duration_minutes") or params.get("duration") or 25
+        try:
+            dur = max(1, min(720, int(raw_dur)))
+        except (ValueError, TypeError):
+            dur = 25
+        params["duration_minutes"] = dur
+        params["duration"] = dur
+        params.setdefault("mode", "FOCUS")
+    elif act_type in ("NAVIGATE_TAB", "NAVIGATE"):
+        act_type = "NAVIGATE"
+        raw_screen = str(params.get("screen") or params.get("route") or params.get("tab") or "home").lower()
+        if "task" in raw_screen:
+            screen = "tasks"
+        elif "habit" in raw_screen:
+            screen = "habits"
+        elif "timer" in raw_screen or "focus" in raw_screen or "clock" in raw_screen:
+            screen = "timer"
+        elif "insight" in raw_screen or "analytic" in raw_screen or "analysis" in raw_screen:
+            screen = "focus_analysis"
+        elif "distract" in raw_screen or "block" in raw_screen:
+            screen = "distractions"
+        elif "profile" in raw_screen:
+            screen = "profile"
+        elif "setting" in raw_screen:
+            screen = "settings"
+        else:
+            screen = "home"
+        params["screen"] = screen
+        params["route"] = screen
+        params["tab"] = screen
+    elif act_type == "EXPORT_DATA":
+        params.setdefault("format", "all")
+    elif act_type in ("CREATE_TASK", "EDIT_TASK", "COMPLETE_TASK"):
+        params.setdefault("title", params.get("title", ""))
+    elif act_type in ("CREATE_HABIT", "EDIT_HABIT", "COMPLETE_HABIT"):
+        params.setdefault("title", params.get("title", ""))
+    elif act_type == "UPDATE_PROFILE":
+        pass
+    else:
+        if act_type not in valid_types:
+            act_type = "NONE"
+            
+    res: Dict[str, Any] = {
+        "type": act_type,
+        "params": params,
+        "payload": params
+    }
+    
+    if "duration_minutes" in params:
+        res["duration"] = int(params["duration_minutes"])
+        res["mode"] = params.get("mode", "FOCUS")
+    if "screen" in params:
+        res["route"] = params["screen"]
+        res["screen_name"] = params["screen"]
+    if "title" in params:
+        res["title"] = params["title"]
+    if "priority" in params:
+        res["priority"] = params["priority"]
+    if "category" in params:
+        res["category"] = params["category"]
         
-    for clause in sub_clauses:
-        c_lower = clause.lower()
+    return res
+
+def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any], str]]:
+    q_trimmed = user_query.strip()
+    if not q_trimmed:
+        return None
         
-        if re.search(r'\b(?:lock(?:ed)?\s+in|locking\s+in)\b', clause, re.IGNORECASE):
-            actions.append({"type": "START_FOCUS_TIMER", "payload": {"duration": 45, "mode": "FOCUS"}})
-            replies.append("Locking in right now. Full focus mode activated - zero distractions. Let's get to work.")
-            continue
-            
-        if re.search(r'\b(?:i\'?m\s+cooked|feeling\s+cooked|cooked)\b', clause, re.IGNORECASE):
-            actions.append({"type": "START_FOCUS_TIMER", "payload": {"duration": 15, "mode": "LONG_BREAK"}})
-            replies.append("You are not cooked, just experiencing cognitive fatigue. Take a 15-minute recovery breather to reset your brain.")
-            continue
-            
-        if re.search(r'\b(?:fr|for\s+real|no\s+cap)\b', clause, re.IGNORECASE):
-            actions.append({"type": "CHAT", "payload": {"reply": "For real, no cap. Let's keep the streak compounding."}})
-            replies.append("For real, no cap. Let's keep the streak compounding.")
-            continue
-            
-        if re.search(r'\b(?:bet|say\s+less)\b', clause, re.IGNORECASE):
-            actions.append({"type": "CHAT", "payload": {"reply": "Bet. Say less - I got you covered."}})
-            replies.append("Bet. Say less - I got you covered.")
-            continue
-            
-        if re.search(r'\b(?:bye\s+byee?|bye\b|goodbye|cya)\b', clause, re.IGNORECASE):
-            actions.append({"type": "CHAT", "payload": {"reply": "Bye byee! Great focus work today. Lock in again soon!"}})
-            replies.append("Bye byee! Great focus work today. Lock in again soon!")
-            continue
+    q_lower = q_trimmed.lower()
+    
+    if re.search(r'\b(?:bye\s*byee?|bye\b|goodbye|cya|catch\s+you\s+later|see\s+ya)\b', q_lower):
+        return normalize_action("NONE", {}), "Bye byee! Great focus session today. Keep crushing it and lock in again soon!"
+        
+    if re.search(r'\b(?:hello|hi\b|hey\b|what\'?s\s+up|wassup|yo\b)\b', q_lower) and len(q_lower.split()) <= 4:
+        return normalize_action("NONE", {}), "Hey! Ready to lock in and get into flow state? What are we working on today?"
 
-        if "task" not in c_lower and "habit" not in c_lower:
-            m_hour = re.search(r'(\d+)\s*(?:hours?|hrs?|h)\b', clause, re.IGNORECASE)
-            m_min = re.search(r'(\d+)\s*(?:mins?|minutes?|m)\b', clause, re.IGNORECASE)
-            m_timer = re.search(r'\b(?:start|set|run|begin|launch|activate)\s+(?:a\s+)?(?:(\d+)\s*)?(focus|timer|session|break|pomodoro)?\b', clause, re.IGNORECASE)
-            has_timer_keyword = any(k in c_lower for k in ["timer", "focus", "break", "pomodoro", "session"])
-            
-            if m_hour or m_min or (m_timer and has_timer_keyword):
-                mins = 25
-                if m_hour:
-                    mins = int(m_hour.group(1)) * 60
-                elif m_min:
-                    mins = int(m_min.group(1))
-                elif m_timer and m_timer.group(1):
-                    mins = int(m_timer.group(1))
-                mode = "FOCUS"
-                if "break" in c_lower:
-                    mode = "LONG_BREAK" if mins >= 15 else "SHORT_BREAK"
-                    if mins == 25 and not m_min and not m_hour:
-                        mins = 5
-                mins = max(1, min(720, mins))
-                actions.append({
-                    "type": "START_FOCUS_TIMER",
-                    "payload": {"duration": mins, "mode": mode}
-                })
-                mode_label = "focus session" if mode == "FOCUS" else "break"
-                replies.append(f"Started a {mins}-minute {mode_label} for you.")
-                continue
-            
-        if re.search(r'\b(?:pause|hold)\s+(?:the\s+)?(?:timer|focus|session)\b', clause, re.IGNORECASE):
-            actions.append({"type": "PAUSE_TIMER", "payload": {}})
-            replies.append("Paused the active focus timer.")
-            continue
-        if re.search(r'\b(?:resume|continue|unpause)\s+(?:the\s+)?(?:timer|focus|session)\b', clause, re.IGNORECASE):
-            actions.append({"type": "RESUME_TIMER", "payload": {}})
-            replies.append("Resumed your focus timer.")
-            continue
-        if re.search(r'\b(?:stop|end|cancel|reset)\s+(?:the\s+)?(?:timer|focus|session)\b', clause, re.IGNORECASE):
-            actions.append({"type": "STOP_TIMER", "payload": {}})
-            replies.append("Stopped the timer.")
-            continue
-            
-        if re.search(r'\b(?:enable|turn on|activate|start)\s+strict(?:\s+focus)?(?:\s+mode)?\b', clause, re.IGNORECASE):
-            actions.append({"type": "ENABLE_STRICT_MODE", "payload": {}})
-            replies.append("Enabled Strict Focus Mode. Distracting apps are now locked.")
-            continue
-        if re.search(r'\b(?:disable|turn off|deactivate|stop)\s+strict(?:\s+focus)?(?:\s+mode)?\b', clause, re.IGNORECASE):
-            actions.append({"type": "DISABLE_STRICT_MODE", "payload": {}})
-            replies.append("Disabled Strict Focus Mode.")
-            continue
-            
-        if re.search(r'\b(?:clear|delete|remove)\s+(?:all\s+)?completed\s+tasks?\b', clause, re.IGNORECASE):
-            actions.append({"type": "CLEAR_COMPLETED_TASKS", "payload": {}})
-            replies.append("Cleared all completed tasks.")
-            continue
-            
-        m_comp = re.search(r'\b(?:complete|finish|done|mark\s+complete|check\s+off)\s+(?:task\s+)?[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
-        if m_comp and not any(w in m_comp.group(1).lower() for w in ["habit", "timer"]):
-            t_title = m_comp.group(1).strip().strip(".'\"")
-            actions.append({"type": "COMPLETE_TASK", "payload": {"title": t_title}})
-            replies.append(f"Marked task '{t_title}' as completed.")
-            continue
-            
-        m_uncomp = re.search(r'\b(?:uncomplete|reopen|undo)\s+(?:task\s+)?[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
-        if m_uncomp and not any(w in m_uncomp.group(1).lower() for w in ["habit", "timer"]):
-            t_title = m_uncomp.group(1).strip().strip(".'\"")
-            actions.append({"type": "UNCOMPLETE_TASK", "payload": {"title": t_title}})
-            replies.append(f"Reopened task '{t_title}'.")
-            continue
-            
-        m_del_task = re.search(r'\b(?:delete|remove)\s+task\s+[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
-        if m_del_task:
-            t_title = m_del_task.group(1).strip().strip(".'\"")
-            actions.append({"type": "DELETE_TASK", "payload": {"title": t_title}})
-            replies.append(f"Deleted task '{t_title}'.")
-            continue
-            
-        m_create_task = re.search(r'\b(?:create|add|new|schedule)\s+(?:a\s+)?task\s+(?:named|to|called)?\s*[\'"]?([^\'"]+?)[\'"]?(?:\s+with\s+(high|medium|low)\s+priority)?$', clause, re.IGNORECASE)
-        if m_create_task:
-            raw_title = m_create_task.group(1).strip().strip(".'\"")
-            priority = "medium"
-            if m_create_task.group(2):
-                priority = m_create_task.group(2).lower()
-            elif "high priority" in c_lower or "urgent" in c_lower:
-                priority = "high"
-                raw_title = re.sub(r'(?i)\s+with\s+high\s+priority', '', raw_title).strip()
-            elif "low priority" in c_lower:
-                priority = "low"
-                raw_title = re.sub(r'(?i)\s+with\s+low\s+priority', '', raw_title).strip()
-                
-            actions.append({
-                "type": "CREATE_TASK",
-                "payload": {"title": raw_title, "priority": priority, "category": "General"}
-            })
-            replies.append(f"Created task '{raw_title}' with {priority} priority.")
-            continue
-            
-        if re.search(r'\b(?:list|show|view|get|what are)\s+(?:my\s+)?(?:pending|overdue|completed|all)?\s*tasks\b', clause, re.IGNORECASE):
-            flt = "all"
-            if "pending" in c_lower:
-                flt = "pending"
-            elif "completed" in c_lower:
-                flt = "completed"
-            elif "overdue" in c_lower:
-                flt = "overdue"
-            elif "high" in c_lower:
-                flt = "high_priority"
-            actions.append({"type": "LIST_TASKS", "payload": {"filter": flt}})
-            replies.append(f"Here is your {flt} tasks overview.")
-            continue
-            
-        m_habit = re.search(r'\b(?:create|add|new|track|build)\s+(?:a\s+)?habit\s+(?:named|to|called)?\s*[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
-        if m_habit:
-            h_title = m_habit.group(1).strip().strip(".'\"")
-            actions.append({
-                "type": "CREATE_HABIT",
-                "payload": {"title": h_title, "frequency": "daily", "icon": "bolt"}
-            })
-            replies.append(f"Created the daily habit '{h_title}'.")
-            continue
-            
-        m_chk_habit = re.search(r'\b(?:check\s+off|log|complete|done)\s+(?:habit\s+)?[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
-        if m_chk_habit and "task" not in c_lower and "timer" not in c_lower:
-            h_title = m_chk_habit.group(1).strip().strip(".'\"")
-            actions.append({"type": "CHECK_OFF_HABIT", "payload": {"title": h_title}})
-            replies.append(f"Checked off habit '{h_title}' for today.")
-            continue
-            
-        m_del_habit = re.search(r'\b(?:delete|remove)\s+habit\s+[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
-        if m_del_habit:
-            h_title = m_del_habit.group(1).strip().strip(".'\"")
-            actions.append({"type": "DELETE_HABIT", "payload": {"title": h_title}})
-            replies.append(f"Deleted habit '{h_title}'.")
-            continue
-            
-        if re.search(r'\b(?:habit\s+status|check\s+habits|my\s+habits\s+today|how\s+are\s+my\s+habits)\b', clause, re.IGNORECASE):
-            actions.append({"type": "HABIT_STATUS", "payload": {}})
-            replies.append("Here is your habit completion status for today.")
-            continue
-            
-        if re.search(r'\b(?:focus\s+summary|my\s+stats|my\s+analytics|how\s+much\s+did\s+i\s+focus|today\'?s?\s+stats|focus\s+minutes)\b', clause, re.IGNORECASE):
-            actions.append({"type": "GET_FOCUS_SUMMARY", "payload": {}})
-            replies.append("Here is your focus and productivity breakdown.")
-            continue
-            
-        m_nav = re.search(r'\b(?:open|show|go to|take me to|navigate to|view)\s+(?:my\s+)?(timer|focus timer|insights|analytics|habits|tasks|task manager|profile|settings|dashboard|home)\b', clause, re.IGNORECASE)
-        if m_nav:
-            dest = m_nav.group(1).lower()
-            tab = "tasks"
-            if "timer" in dest or "focus" in dest:
-                tab = "focus_timer"
-            elif "habit" in dest:
-                tab = "habits"
-            elif "insight" in dest or "analytic" in dest:
-                tab = "analytics"
-            elif "profile" in dest or "setting" in dest:
-                tab = "profile"
-            elif "home" in dest or "dash" in dest:
-                tab = "home"
-            actions.append({"type": "NAVIGATE_TAB", "payload": {"tab": tab, "route": tab}})
-            replies.append(f"Navigating to {tab}.")
-            continue
-            
-        m_name = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?name\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
-        if m_name:
-            new_name = m_name.group(1).strip().strip(".'\"")
-            actions.append({"type": "UPDATE_PROFILE", "payload": {"name": new_name}})
-            replies.append(f"Updated your profile name to '{new_name}'.")
-            continue
-            
-        m_bio = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?bio\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', clause, re.IGNORECASE)
-        if m_bio:
-            new_bio = m_bio.group(1).strip().strip(".'\"")
-            actions.append({"type": "UPDATE_PROFILE", "payload": {"bio": new_bio}})
-            replies.append("Updated your profile bio.")
-            continue
+    if re.search(r'\b(?:fr|for\s+real|no\s+cap)\b', q_lower) and len(q_lower.split()) <= 4:
+        return normalize_action("NONE", {}), "For real, no cap. Let's keep the streak compounding."
+        
+    if re.search(r'\b(?:bet|say\s+less)\b', q_lower) and len(q_lower.split()) <= 4:
+        return normalize_action("NONE", {}), "Bet. Say less - I got you covered."
 
-        if re.search(r'\b(?:export|download|backup)\s+(?:all\s+)?(?:productivity\s+)?(?:data|history|records)\b', clause, re.IGNORECASE):
-            actions.append({"type": "EXPORT_DATA", "payload": {}})
-            replies.append("Exporting your complete productivity history.")
-            continue
-            
-        if re.search(r'\b(?:export|share|download|save)\s+(?:this\s+)?(?:chat|transcript|conversation)\b', clause, re.IGNORECASE):
-            actions.append({"type": "EXPORT_CHAT", "payload": {}})
-            replies.append("Exporting chat transcript.")
-            continue
-            
-        if re.search(r'\b(?:clear|delete|reset)\s+(?:this\s+)?(?:chat|history|conversation)\b', clause, re.IGNORECASE):
-            actions.append({"type": "CLEAR_CHAT", "payload": {}})
-            replies.append("Cleared chat history.")
-            continue
+    if re.search(r'\b(?:i\'?m\s+cooked|feeling\s+cooked|cooked)\b', q_lower):
+        act = normalize_action("START_TIMER", {"duration_minutes": 15, "mode": "LONG_BREAK"})
+        return act, "You are not cooked, just experiencing cognitive fatigue. Take a 15-minute recovery breather to reset your brain."
 
-    composite_reply = " ".join(replies) if replies else None
-    return actions, composite_reply
+    m_lock_in = re.search(r'\b(?:lock(?:ed)?\s+in|locking\s+in)\b', q_lower)
+    if m_lock_in:
+        m_hr = re.search(r'(\d+)\s*(?:hours?|hrs?|h)\b', q_lower)
+        m_min = re.search(r'(\d+)\s*(?:mins?|minutes?|m)\b', q_lower)
+        dur = 45
+        if m_hr:
+            dur = int(m_hr.group(1)) * 60
+        elif m_min:
+            dur = int(m_min.group(1))
+        dur = max(1, min(720, dur))
+        act = normalize_action("START_TIMER", {"duration_minutes": dur, "mode": "FOCUS"})
+        return act, f"Locking in for {dur} minutes right now. Full focus mode activated - zero distractions. Let's get to work."
+
+    m_asked = re.search(r'\b(?:i\s+)?asked\s+for\s+(\d+)\s*(?:hours?|hrs?|h|mins?|minutes?|m)?\b', q_lower)
+    if m_asked:
+        num = int(m_asked.group(1))
+        dur = num * 60 if re.search(r'\b(?:hours?|hrs?|h)\b', q_lower) else num
+        dur = max(1, min(720, dur))
+        act = normalize_action("START_TIMER", {"duration_minutes": dur, "mode": "FOCUS"})
+        return act, f"Understood, locked in for {dur} minutes. Starting your timer now."
+
+    if "task" not in q_lower and "habit" not in q_lower:
+        m_hour = re.search(r'(\d+)\s*(?:hours?|hrs?|h)\b', q_lower)
+        m_min = re.search(r'(\d+)\s*(?:mins?|minutes?|m)\b', q_lower)
+        has_timer_kw = any(k in q_lower for k in ["timer", "focus", "pomodoro", "session", "break", "countdown"])
+        m_timer_cmd = re.search(r'\b(?:start|set|run|begin|launch|activate)\b', q_lower)
+        
+        if (m_timer_cmd and has_timer_kw) or ((m_hour or m_min) and has_timer_kw):
+            dur = 25
+            if m_hour:
+                dur = int(m_hour.group(1)) * 60
+            elif m_min:
+                dur = int(m_min.group(1))
+            mode = "LONG_BREAK" if ("break" in q_lower and dur >= 15) else ("SHORT_BREAK" if "break" in q_lower else "FOCUS")
+            if "break" in q_lower and dur == 25 and not m_min and not m_hour:
+                dur = 5
+            dur = max(1, min(720, dur))
+            act = normalize_action("START_TIMER", {"duration_minutes": dur, "mode": mode})
+            label = "focus session" if mode == "FOCUS" else "break"
+            return act, f"Started a {dur}-minute {label} for you. Lock in!"
+
+    m_nav = re.search(r'\b(?:open|show|go\s+to|take\s+me\s+to|navigate\s+to|view)\s+(?:my\s+)?([a-zA-Z_\s]+)\b', q_lower)
+    if m_nav:
+        dest_str = m_nav.group(1).strip()
+        screen = None
+        if re.search(r'\b(?:home|dashboard)\b', dest_str):
+            screen = "home"
+        elif re.search(r'\b(?:tasks?|task\s+manager)\b', dest_str):
+            screen = "tasks"
+        elif re.search(r'\b(?:habits?)\b', dest_str):
+            screen = "habits"
+        elif re.search(r'\b(?:timers?|focus\s+timer|clock)\b', dest_str):
+            screen = "timer"
+        elif re.search(r'\b(?:focus\s*analysis|analysis|insights?|analytics?)\b', dest_str):
+            screen = "focus_analysis"
+        elif re.search(r'\b(?:distractions?|blocked\s+apps?)\b', dest_str):
+            screen = "distractions"
+        elif re.search(r'\b(?:profiles?)\b', dest_str):
+            screen = "profile"
+        elif re.search(r'\b(?:settings?)\b', dest_str):
+            screen = "settings"
+            
+        if screen:
+            act = normalize_action("NAVIGATE", {"screen": screen})
+            return act, f"Navigating to {screen}."
+
+    if re.search(r'\b(?:export|backup|download)\s+(?:all\s+)?(?:productivity\s+)?(?:data|history|records)\b', q_lower):
+        act = normalize_action("EXPORT_DATA", {"format": "all"})
+        return act, "Exporting your complete productivity data."
+
+    m_edit_task = re.search(r'\b(?:edit|rename|change|update)\s+task\s+[\'"]?([^\'"]+?)[\'"]?\s+(?:to|as)\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    if m_edit_task:
+        old_t = m_edit_task.group(1).strip().strip(".'\"")
+        new_t = m_edit_task.group(2).strip().strip(".'\"")
+        act = normalize_action("EDIT_TASK", {"title": old_t, "new_title": new_t, "deadline": None, "priority": None})
+        return act, f"Updated task '{old_t}' to '{new_t}'."
+
+    m_comp_task = re.search(r'\b(?:complete|finish|done|mark\s+complete|check\s+off)\s+(?:task\s+)?[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    if m_comp_task and not any(k in m_comp_task.group(1).lower() for k in ["habit", "timer"]):
+        t_title = m_comp_task.group(1).strip().strip(".'\"")
+        act = normalize_action("COMPLETE_TASK", {"title": t_title})
+        return act, f"Marked task '{t_title}' as completed."
+
+    m_create_task = re.search(r'\b(?:create|add|new|schedule)\s+(?:a\s+)?task\s+(?:named|to|called)?\s*[\'"]?([^\'"]+?)[\'"]?(?:\s+with\s+(high|medium|low)\s+priority)?$', q_trimmed, re.IGNORECASE)
+    if m_create_task:
+        raw_title = m_create_task.group(1).strip().strip(".'\"")
+        priority = "medium"
+        if m_create_task.group(2):
+            priority = m_create_task.group(2).lower()
+        elif "high priority" in q_lower or "urgent" in q_lower:
+            priority = "high"
+            raw_title = re.sub(r'(?i)\s+with\s+high\s+priority', '', raw_title).strip()
+        elif "low priority" in q_lower:
+            priority = "low"
+            raw_title = re.sub(r'(?i)\s+with\s+low\s+priority', '', raw_title).strip()
+        deadline = "Today" if "due today" in q_lower else ("Tomorrow" if "due tomorrow" in q_lower else None)
+        act = normalize_action("CREATE_TASK", {"title": raw_title, "priority": priority, "deadline": deadline})
+        return act, f"Created task '{raw_title}' with {priority} priority."
+
+    m_edit_habit = re.search(r'\b(?:edit|rename|change|update)\s+habit\s+[\'"]?([^\'"]+?)[\'"]?\s+(?:to|as)\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    if m_edit_habit:
+        old_h = m_edit_habit.group(1).strip().strip(".'\"")
+        new_h = m_edit_habit.group(2).strip().strip(".'\"")
+        act = normalize_action("EDIT_HABIT", {"title": old_h, "new_title": new_h})
+        return act, f"Updated habit '{old_h}' to '{new_h}'."
+
+    m_comp_habit = re.search(r'\b(?:check\s+off|log|complete|done)\s+(?:habit\s+)?[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    if m_comp_habit and "task" not in q_lower and "timer" not in q_lower:
+        h_title = m_comp_habit.group(1).strip().strip(".'\"")
+        act = normalize_action("COMPLETE_HABIT", {"title": h_title})
+        return act, f"Checked off habit '{h_title}' for today."
+
+    m_create_habit = re.search(r'\b(?:create|add|new|track|build)\s+(?:a\s+)?habit\s+(?:named|to|called)?\s*[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    if m_create_habit:
+        h_title = m_create_habit.group(1).strip().strip(".'\"")
+        act = normalize_action("CREATE_HABIT", {"title": h_title})
+        return act, f"Created the habit '{h_title}'."
+
+    m_name = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?name\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    if m_name:
+        new_name = m_name.group(1).strip().strip(".'\"")
+        act = normalize_action("UPDATE_PROFILE", {"name": new_name, "bio": None})
+        return act, f"Updated your profile name to '{new_name}'."
+
+    m_bio = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?bio\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    if m_bio:
+        new_bio = m_bio.group(1).strip().strip(".'\"")
+        act = normalize_action("UPDATE_PROFILE", {"name": None, "bio": new_bio})
+        return act, "Updated your profile bio."
+
+    return None
+
+def parse_llm_json_or_text(raw_text: str, original_query: str) -> Tuple[str, Dict[str, Any]]:
+    cleaned = raw_text.replace("<|im_end|>", "").replace("<|im_start|>", "").strip()
+    cleaned = emoji_pattern.sub('', cleaned).strip()
+    cleaned = html.unescape(cleaned)
+    
+    json_candidate = cleaned
+    m_block = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', cleaned, re.IGNORECASE)
+    if m_block:
+        json_candidate = m_block.group(1).strip()
+    else:
+        m_brace = re.search(r'(\{[\s\S]*\})', cleaned)
+        if m_brace:
+            json_candidate = m_brace.group(1).strip()
+            
+    try:
+        data = json.loads(json_candidate)
+        if isinstance(data, dict) and "reply" in data:
+            reply_str = str(data["reply"]).strip()
+            action_data = data.get("action")
+            if isinstance(action_data, dict) and "type" in action_data:
+                act = normalize_action(action_data["type"], action_data.get("params") or {})
+                return reply_str, act
+            extracted = extract_actions_and_reply(original_query)
+            if extracted:
+                return reply_str, extracted[0]
+            return reply_str, normalize_action("NONE", {})
+    except Exception:
+        pass
+        
+    extracted = extract_actions_and_reply(original_query)
+    if extracted:
+        return cleaned, extracted[0]
+        
+    return cleaned, normalize_action("NONE", {})
+
+def make_response_dict(reply_text: str, action_obj: Dict[str, Any]) -> Dict[str, Any]:
+    clean_reply = emoji_pattern.sub('', html.unescape(reply_text)).strip()
+    has_action = action_obj.get("type") and action_obj["type"] != "NONE"
+    actions_list = [action_obj] if has_action else []
+    return {
+        "status": "success",
+        "success": True,
+        "reply": clean_reply,
+        "response": clean_reply,
+        "message": clean_reply,
+        "text": clean_reply,
+        "insight": clean_reply,
+        "action": action_obj,
+        "actions": actions_list,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
 
 class Message(BaseModel):
     role: str = Field(..., max_length=50)
@@ -426,22 +487,23 @@ def build_prompt_from_messages(messages: List[Union[Message, dict]]) -> str:
     parts.append("<|im_start|>assistant\n")
     return "\n".join(parts)
 
-def generate_response(prompt_text: str, max_tokens: int = 220, temperature: float = 0.4, top_p: float = 0.9) -> str:
+def generate_response(prompt_text: str, original_query: str, max_tokens: int = 350, temperature: float = 0.4, top_p: float = 0.9) -> Tuple[str, Dict[str, Any]]:
     api_key = os.environ.get("GEMINI_API_KEY", "").strip() or GEMINI_API_KEY
     if api_key:
-        candidate_models = ["gemini-2.5-flash", "gemini-2.5-flash-preview", "gemini-1.5-flash"]
+        candidate_models = ["gemini-3.8-flash", "gemini-2.5-flash-preview", "gemini-2.5-flash", "gemini-1.5-flash"]
         for model_name in candidate_models:
             try:
                 genai.configure(api_key=api_key)
-                gemini_model = genai.GenerativeModel(model_name)
+                try:
+                    gemini_model = genai.GenerativeModel(model_name=model_name, system_instruction=SYSTEM_PERSONA)
+                except Exception:
+                    gemini_model = genai.GenerativeModel(model_name=model_name)
+                    
                 resp = gemini_model.generate_content(prompt_text)
                 if resp and resp.text:
-                    reply = resp.text.strip()
-                    reply = reply.replace("<|im_end|>", "").replace("<|im_start|>", "").strip()
-                    reply = emoji_pattern.sub('', reply).strip()
-                    clean_reply = html.unescape(reply)
-                    if clean_reply:
-                        return clean_reply
+                    reply, action_obj = parse_llm_json_or_text(resp.text.strip(), original_query)
+                    if reply:
+                        return reply, action_obj
             except Exception as e:
                 print(f"[GrootAI] Gemini API error with model '{model_name}': {e}")
     else:
@@ -464,16 +526,18 @@ def generate_response(prompt_text: str, max_tokens: int = 220, temperature: floa
                     early_stopping=True
                 )
             generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
-            reply = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
-            reply = reply.replace("<|im_end|>", "").replace("<|im_start|>", "").strip()
-            reply = emoji_pattern.sub('', reply).strip()
-            reply = html.unescape(reply)
+            raw_reply = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
+            reply, action_obj = parse_llm_json_or_text(raw_reply, original_query)
             if reply:
-                return reply
+                return reply, action_obj
         except Exception as e:
             print(f"[GrootAI] Local model generation error: {e}")
 
-    return "I am Groot, your focus and productivity companion. How can I assist you with your tasks today?"
+    extracted = extract_actions_and_reply(original_query)
+    if extracted:
+        return extracted[1], extracted[0]
+
+    return "I am Groot, your focus and productivity collaborator. How can we level up your flow state today?", normalize_action("NONE", {})
 
 @app.get("/")
 @app.get("/health")
@@ -483,18 +547,7 @@ def health():
 @app.get("/chat")
 @app.get("/groot/chat")
 def chat_endpoint_get():
-    msg = "I am Groot, your focus and productivity companion."
-    return {
-        "status": "success",
-        "success": True,
-        "reply": msg,
-        "response": msg,
-        "message": msg,
-        "text": msg,
-        "insight": msg,
-        "actions": [],
-        "action": None
-    }
+    return make_response_dict("I am Groot, your focus and productivity companion.", normalize_action("NONE", {}))
 
 @app.post("/chat")
 @app.post("/groot/chat")
@@ -503,78 +556,20 @@ def chat_endpoint(req: ChatRequest):
     user_msg = html.unescape(user_msg.strip())
     
     if is_non_english(user_msg):
-        return {
-            "status": "success",
-            "success": True,
-            "reply": ENGLISH_REFUSAL_MESSAGE,
-            "response": ENGLISH_REFUSAL_MESSAGE,
-            "message": ENGLISH_REFUSAL_MESSAGE,
-            "text": ENGLISH_REFUSAL_MESSAGE,
-            "insight": ENGLISH_REFUSAL_MESSAGE,
-            "actions": [],
-            "action": None
-        }
-    if PHYSICAL_ACTION_RE.search(user_msg):
-        return {
-            "status": "success",
-            "success": True,
-            "reply": PHYSICAL_DECLINE_MESSAGE,
-            "response": PHYSICAL_DECLINE_MESSAGE,
-            "message": PHYSICAL_DECLINE_MESSAGE,
-            "text": PHYSICAL_DECLINE_MESSAGE,
-            "insight": PHYSICAL_DECLINE_MESSAGE,
-            "actions": [],
-            "action": None
-        }
-    if OFF_TOPIC_RE.search(user_msg):
-        return {
-            "status": "success",
-            "success": True,
-            "reply": DECLINE_MESSAGE,
-            "response": DECLINE_MESSAGE,
-            "message": DECLINE_MESSAGE,
-            "text": DECLINE_MESSAGE,
-            "insight": DECLINE_MESSAGE,
-            "actions": [],
-            "action": None
-        }
+        return make_response_dict(ENGLISH_REFUSAL_MESSAGE, normalize_action("NONE", {}))
 
-    actions, extracted_reply = extract_actions_and_reply(user_msg)
-    if actions and extracted_reply:
-        unescaped_reply = html.unescape(extracted_reply)
-        return {
-            "status": "success",
-            "success": True,
-            "reply": unescaped_reply,
-            "response": unescaped_reply,
-            "message": unescaped_reply,
-            "text": unescaped_reply,
-            "insight": unescaped_reply,
-            "actions": actions,
-            "action": actions[0] if actions else None,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
+    extracted = extract_actions_and_reply(user_msg)
+    if extracted:
+        action_obj, reply_text = extracted
+        return make_response_dict(reply_text, action_obj)
 
     messages = [
         Message(role="system", content=SYSTEM_PERSONA),
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    llm_reply = generate_response(prompt_text, max_tokens=220, temperature=0.3)
-    unescaped_llm_reply = html.unescape(llm_reply)
-    
-    return {
-        "status": "success",
-        "success": True,
-        "reply": unescaped_llm_reply,
-        "response": unescaped_llm_reply,
-        "message": unescaped_llm_reply,
-        "text": unescaped_llm_reply,
-        "insight": unescaped_llm_reply,
-        "actions": actions,
-        "action": actions[0] if actions else None,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-    }
+    llm_reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=350, temperature=0.3)
+    return make_response_dict(llm_reply, action_obj)
 
 @app.post("/v1/chat/completions")
 def chat_completions(req: ChatCompletionRequest):
@@ -590,62 +585,23 @@ def chat_completions(req: ChatCompletionRequest):
     user_content = html.unescape(user_content.strip()) if user_content else ""
 
     if user_content and is_non_english(user_content):
+        res = make_response_dict(ENGLISH_REFUSAL_MESSAGE, normalize_action("NONE", {}))
         return {
             "id": "chatcmpl-groot-language",
             "object": "chat.completion",
             "choices": [{"index": 0, "message": {"role": "assistant", "content": ENGLISH_REFUSAL_MESSAGE}, "finish_reason": "stop"}],
-            "response": ENGLISH_REFUSAL_MESSAGE,
-            "reply": ENGLISH_REFUSAL_MESSAGE,
-            "insight": ENGLISH_REFUSAL_MESSAGE,
-            "message": ENGLISH_REFUSAL_MESSAGE,
-            "actions": [],
-            "action": None,
-            "success": True
+            **res
         }
 
-    if user_content and PHYSICAL_ACTION_RE.search(user_content):
-        return {
-            "id": "chatcmpl-groot-physical",
-            "object": "chat.completion",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": PHYSICAL_DECLINE_MESSAGE}, "finish_reason": "stop"}],
-            "response": PHYSICAL_DECLINE_MESSAGE,
-            "reply": PHYSICAL_DECLINE_MESSAGE,
-            "insight": PHYSICAL_DECLINE_MESSAGE,
-            "message": PHYSICAL_DECLINE_MESSAGE,
-            "actions": [],
-            "action": None,
-            "success": True
-        }
-
-    if user_content and OFF_TOPIC_RE.search(user_content):
-        return {
-            "id": "chatcmpl-groot-decline",
-            "object": "chat.completion",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": DECLINE_MESSAGE}, "finish_reason": "stop"}],
-            "response": DECLINE_MESSAGE,
-            "reply": DECLINE_MESSAGE,
-            "insight": DECLINE_MESSAGE,
-            "message": DECLINE_MESSAGE,
-            "actions": [],
-            "action": None,
-            "success": True
-        }
-
-    actions, extracted_reply = extract_actions_and_reply(user_content)
-    if actions and extracted_reply:
-        unescaped_reply = html.unescape(extracted_reply)
+    extracted = extract_actions_and_reply(user_content)
+    if extracted:
+        action_obj, unescaped_reply = extracted
+        res = make_response_dict(unescaped_reply, action_obj)
         return {
             "id": "chatcmpl-groot-action",
             "object": "chat.completion",
             "choices": [{"index": 0, "message": {"role": "assistant", "content": unescaped_reply}, "finish_reason": "stop"}],
-            "response": unescaped_reply,
-            "reply": unescaped_reply,
-            "insight": unescaped_reply,
-            "message": unescaped_reply,
-            "actions": actions,
-            "action": actions[0] if actions else None,
-            "status": "success",
-            "success": True
+            **res
         }
 
     if not messages and req.prompt:
@@ -660,25 +616,17 @@ def chat_completions(req: ChatCompletionRequest):
         ]
     
     prompt_text = build_prompt_from_messages(messages)
-    max_tokens = min(req.max_tokens or 220, 300)
+    max_tokens = min(req.max_tokens or 350, 500)
     temp = req.temperature if req.temperature is not None else 0.4
     top_p = req.top_p if req.top_p is not None else 0.9
     
-    reply = generate_response(prompt_text, max_tokens=max_tokens, temperature=temp, top_p=top_p)
-    unescaped_reply = html.unescape(reply)
-    
+    reply, action_obj = generate_response(prompt_text, user_content, max_tokens=max_tokens, temperature=temp, top_p=top_p)
+    res = make_response_dict(reply, action_obj)
     return {
         "id": "chatcmpl-groot",
         "object": "chat.completion",
-        "choices": [{"index": 0, "message": {"role": "assistant", "content": unescaped_reply}, "finish_reason": "stop"}],
-        "response": unescaped_reply,
-        "reply": unescaped_reply,
-        "insight": unescaped_reply,
-        "message": unescaped_reply,
-        "actions": actions,
-        "action": actions[0] if actions else None,
-        "status": "success",
-        "success": True
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": reply}, "finish_reason": "stop"}],
+        **res
     }
 
 @app.post("/ask_groot")
@@ -688,77 +636,20 @@ def ask_groot(req: SimpleChatRequest):
     user_msg = html.unescape(user_msg.strip())
     
     if is_non_english(user_msg):
-        return {
-            "status": "success",
-            "success": True,
-            "response": ENGLISH_REFUSAL_MESSAGE,
-            "reply": ENGLISH_REFUSAL_MESSAGE,
-            "message": ENGLISH_REFUSAL_MESSAGE,
-            "text": ENGLISH_REFUSAL_MESSAGE,
-            "insight": ENGLISH_REFUSAL_MESSAGE,
-            "actions": [],
-            "action": None
-        }
-    if PHYSICAL_ACTION_RE.search(user_msg):
-        return {
-            "status": "success",
-            "success": True,
-            "response": PHYSICAL_DECLINE_MESSAGE,
-            "reply": PHYSICAL_DECLINE_MESSAGE,
-            "message": PHYSICAL_DECLINE_MESSAGE,
-            "text": PHYSICAL_DECLINE_MESSAGE,
-            "insight": PHYSICAL_DECLINE_MESSAGE,
-            "actions": [],
-            "action": None
-        }
-    if OFF_TOPIC_RE.search(user_msg):
-        return {
-            "status": "success",
-            "success": True,
-            "response": DECLINE_MESSAGE,
-            "reply": DECLINE_MESSAGE,
-            "message": DECLINE_MESSAGE,
-            "text": DECLINE_MESSAGE,
-            "insight": DECLINE_MESSAGE,
-            "actions": [],
-            "action": None
-        }
+        return make_response_dict(ENGLISH_REFUSAL_MESSAGE, normalize_action("NONE", {}))
 
-    actions, extracted_reply = extract_actions_and_reply(user_msg)
-    if actions and extracted_reply:
-        unescaped_reply = html.unescape(extracted_reply)
-        return {
-            "status": "success",
-            "success": True,
-            "response": unescaped_reply,
-            "reply": unescaped_reply,
-            "message": unescaped_reply,
-            "text": unescaped_reply,
-            "insight": unescaped_reply,
-            "actions": actions,
-            "action": actions[0] if actions else None,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
+    extracted = extract_actions_and_reply(user_msg)
+    if extracted:
+        action_obj, reply_text = extracted
+        return make_response_dict(reply_text, action_obj)
 
     messages = [
         Message(role="system", content=SYSTEM_PERSONA),
         Message(role="user", content=user_msg)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=220, temperature=0.3)
-    unescaped_reply = html.unescape(reply)
-    return {
-        "status": "success",
-        "success": True,
-        "response": unescaped_reply,
-        "reply": unescaped_reply,
-        "message": unescaped_reply,
-        "text": unescaped_reply,
-        "insight": unescaped_reply,
-        "actions": actions,
-        "action": actions[0] if actions else None,
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-    }
+    reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=350, temperature=0.3)
+    return make_response_dict(reply, action_obj)
 
 @app.post("/predict")
 def predict(req: SimpleChatRequest):
@@ -769,15 +660,10 @@ def generate(req: dict):
     user_msg = req.get("prompt") or req.get("message") or req.get("query") or ""
     user_msg = html.unescape(user_msg.strip())
     
-    if user_msg and PHYSICAL_ACTION_RE.search(user_msg):
-        return {"status": "success", "success": True, "response": PHYSICAL_DECLINE_MESSAGE, "reply": PHYSICAL_DECLINE_MESSAGE, "message": PHYSICAL_DECLINE_MESSAGE, "text": PHYSICAL_DECLINE_MESSAGE, "insight": PHYSICAL_DECLINE_MESSAGE, "actions": [], "action": None}
-    if user_msg and OFF_TOPIC_RE.search(user_msg):
-        return {"status": "success", "success": True, "response": DECLINE_MESSAGE, "reply": DECLINE_MESSAGE, "message": DECLINE_MESSAGE, "text": DECLINE_MESSAGE, "insight": DECLINE_MESSAGE, "actions": [], "action": None}
-
-    actions, extracted_reply = extract_actions_and_reply(user_msg)
-    if actions and extracted_reply:
-        unescaped_reply = html.unescape(extracted_reply)
-        return {"status": "success", "success": True, "response": unescaped_reply, "reply": unescaped_reply, "message": unescaped_reply, "text": unescaped_reply, "insight": unescaped_reply, "actions": actions, "action": actions[0] if actions else None}
+    extracted = extract_actions_and_reply(user_msg)
+    if extracted:
+        action_obj, reply_text = extracted
+        return make_response_dict(reply_text, action_obj)
 
     if "messages" in req and isinstance(req["messages"], list):
         msg_objs = [Message(**m) if isinstance(m, dict) else m for m in req["messages"]]
@@ -789,9 +675,8 @@ def generate(req: dict):
         ]
         prompt_text = build_prompt_from_messages(messages)
     
-    reply = generate_response(prompt_text, max_tokens=220, temperature=0.4)
-    unescaped_reply = html.unescape(reply)
-    return {"status": "success", "success": True, "response": unescaped_reply, "reply": unescaped_reply, "message": unescaped_reply, "text": unescaped_reply, "insight": unescaped_reply, "actions": actions, "action": actions[0] if actions else None}
+    reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=350, temperature=0.4)
+    return make_response_dict(reply, action_obj)
 
 class TaskBreakdownRequest(BaseModel):
     task_title: Optional[str] = None
@@ -814,7 +699,7 @@ def breakdown_task(req: TaskBreakdownRequest):
             Message(role="user", content=user_prompt)
         ]
         prompt_text = build_prompt_from_messages(messages)
-        raw_output = generate_response(prompt_text, max_tokens=140, temperature=0.3)
+        raw_output, _ = generate_response(prompt_text, user_prompt, max_tokens=140, temperature=0.3)
         lines = [html.unescape(line.strip().lstrip("-*1234567890. ")) for line in raw_output.splitlines() if line.strip()]
         for l in lines:
             if len(l) > 3 and not l.lower().startswith("here are") and not l.lower().startswith("subtask"):
@@ -853,7 +738,7 @@ def create_study_plan(req: StudyPlanRequest):
         Message(role="user", content=user_prompt)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=260, temperature=0.3)
+    reply, _ = generate_response(prompt_text, user_prompt, max_tokens=260, temperature=0.3)
     unescaped_reply = html.unescape(reply)
     return {
         "status": "success",
@@ -883,7 +768,7 @@ def focus_coaching(req: FocusCoachingRequest):
         Message(role="user", content=coaching_prompt)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply = generate_response(prompt_text, max_tokens=220, temperature=0.3)
+    reply, _ = generate_response(prompt_text, query, max_tokens=220, temperature=0.3)
     unescaped_reply = html.unescape(reply)
     return {
         "status": "success",
