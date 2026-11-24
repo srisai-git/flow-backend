@@ -124,6 +124,8 @@ SYSTEM_PERSONA = (
     "- CREATE_HABIT: params: {\"title\": \"<string>\"}\n"
     "- EDIT_HABIT: params: {\"title\": \"<string>\", \"new_title\": \"<string>\"}\n"
     "- COMPLETE_HABIT: params: {\"title\": \"<string>\"}\n"
+    "- BLOCK_APPS: params: {\"apps\": [\"<app_name>\", ...]}\n"
+    "- UNBLOCK_APPS: params: {\"apps\": [\"<app_name>\", ...]}\n"
     "- UPDATE_PROFILE: params: {\"name\": \"<string or null>\", \"bio\": \"<string or null>\"}\n"
     "- NONE: params: {}\n"
 )
@@ -152,6 +154,7 @@ def normalize_action(action_type: str, params: Optional[Dict[str, Any]] = None) 
         "START_TIMER", "NAVIGATE", "EXPORT_DATA",
         "CREATE_TASK", "EDIT_TASK", "COMPLETE_TASK",
         "CREATE_HABIT", "EDIT_HABIT", "COMPLETE_HABIT",
+        "BLOCK_APPS", "UNBLOCK_APPS",
         "UPDATE_PROFILE", "NONE"
     }
 
@@ -193,6 +196,17 @@ def normalize_action(action_type: str, params: Optional[Dict[str, Any]] = None) 
         params.setdefault("title", params.get("title", ""))
     elif act_type in ("CREATE_HABIT", "EDIT_HABIT", "COMPLETE_HABIT"):
         params.setdefault("title", params.get("title", ""))
+    elif act_type in ("BLOCK_APPS", "UNBLOCK_APPS"):
+        raw_apps = params.get("apps")
+        if isinstance(raw_apps, str):
+            app_list = [a.strip() for a in re.split(r',|\band\b|&', raw_apps) if a.strip()]
+        elif isinstance(raw_apps, list):
+            app_list = [str(a).strip() for a in raw_apps if str(a).strip()]
+        else:
+            raw_title = str(params.get("title") or "")
+            app_list = [a.strip() for a in re.split(r',|\band\b|&', raw_title) if a.strip()]
+        params["apps"] = app_list
+        params["title"] = ", ".join(app_list)
     elif act_type == "UPDATE_PROFILE":
         pass
     else:
@@ -374,6 +388,38 @@ def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any],
         h_title = m_create_habit.group(1).strip().strip(".'\"")
         act = normalize_action("CREATE_HABIT", {"title": h_title})
         return act, f"Created the habit '{h_title}'."
+
+    m_block_strict = re.search(
+        r'\b(?:block|restrict|lock|add)\s+(?:apps?\s+)?(?:called\s+)?([a-zA-Z0-9,\s&]+?)(?:\s+(?:to|in|into)\s+(?:strict(?:\s+focus)?(?:\s+mode)?|blocked(?:\s+apps?)?))?$',
+        q_trimmed.rstrip(".?!"),
+        re.IGNORECASE
+    )
+    if m_block_strict and (
+        re.search(r'\b(?:block|restrict|lock)\b', q_lower) or
+        re.search(r'\b(?:to|in|into)\s+(?:strict|blocked)\b', q_lower)
+    ) and not any(k in q_lower for k in ["task", "habit", "timer"]):
+        raw_apps = m_block_strict.group(1).strip()
+        raw_apps = re.sub(r'(?i)\s+(?:to|in|into)\s+(?:strict(?:\s+focus)?(?:\s+mode)?|blocked(?:\s+apps?)?)$', '', raw_apps).strip()
+        app_list = [a.strip() for a in re.split(r'(?i)\s+(?:and|&)\s+|,|\s+', raw_apps) if a.strip() and a.lower() not in ("apps", "app", "the", "a")]
+        if app_list:
+            act = normalize_action("BLOCK_APPS", {"apps": app_list, "title": ", ".join(app_list)})
+            return act, f"Added {', '.join(app_list)} to Strict Focus Mode blocked apps."
+
+    m_unblock_strict = re.search(
+        r'\b(?:unblock|unlock|allow|remove)\s+(?:apps?\s+)?(?:called\s+)?([a-zA-Z0-9,\s&]+?)(?:\s+(?:from|out\s+of)\s+(?:strict(?:\s+focus)?(?:\s+mode)?|blocked(?:\s+apps?)?))?$',
+        q_trimmed.rstrip(".?!"),
+        re.IGNORECASE
+    )
+    if m_unblock_strict and (
+        re.search(r'\b(?:unblock|unlock|allow)\b', q_lower) or
+        re.search(r'\b(?:from|out\s+of)\s+(?:strict|blocked)\b', q_lower)
+    ) and not any(k in q_lower for k in ["task", "habit", "timer"]):
+        raw_apps = m_unblock_strict.group(1).strip()
+        raw_apps = re.sub(r'(?i)\s+(?:from|out\s+of)\s+(?:strict(?:\s+focus)?(?:\s+mode)?|blocked(?:\s+apps?)?)$', '', raw_apps).strip()
+        app_list = [a.strip() for a in re.split(r'(?i)\s+(?:and|&)\s+|,|\s+', raw_apps) if a.strip() and a.lower() not in ("apps", "app", "the", "a")]
+        if app_list:
+            act = normalize_action("UNBLOCK_APPS", {"apps": app_list, "title": ", ".join(app_list)})
+            return act, f"Removed {', '.join(app_list)} from Strict Focus Mode blocked apps."
 
     m_name = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?name\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed.rstrip(".?!"), re.IGNORECASE)
     if m_name:
