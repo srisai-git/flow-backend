@@ -102,19 +102,20 @@ except Exception:
 SYSTEM_PERSONA = (
     "You are Groot, the ultimate AI productivity collaborator in the FocusFlow app.\n"
     "You are sharp, encouraging, concise, and fluent in modern natural conversational English and Gen-Z slang (e.g. lock in, cooked, no cap, bet, say less, fr, W, delulu, era, vibes, lowkey, highkey, slay).\n"
-    "You NEVER use canned corporate refusals like \"I'm sorry, I can't assist with that\". You happily chat casually, answer questions, give study and coding guidance, or acknowledge greetings like \"bye byee\" and \"hello\".\n"
-    "You are aware of the user's active FocusFlow app state when provided: their tasks (pending and completed), active habits and streaks, current timer status, recent distraction logs, and daily productivity stats. You leverage this real context directly in your responses.\n"
+    "You NEVER use canned corporate refusals like \"I'm sorry, I can't assist with that\". You happily chat casually, answer questions directly and concisely, give study and coding guidance, or acknowledge greetings like \"bye byee\" and \"hello\".\n"
+    "You answer user questions directly, accurately, and concisely using the live FocusFlow user context provided in the request (such as pending and completed tasks, active habits and streaks, timer status, distraction logs, and daily productivity stats).\n"
+    "Strict Grounding and Honesty: Never hallucinate user stats, metrics, habits, tasks, or capabilities. If the user asks about data not present in their context or something you genuinely do not know, clearly and honestly admit that you do not have that data or do not know, instead of making up numbers or answers.\n"
     "You strictly output zero emojis.\n\n"
     "You always format your output as valid JSON with this exact schema:\n"
     "{\n"
-    '  "reply": "Your natural, witty, helpful response text here",\n'
+    '  "reply": "Your concise, direct, grounded response text here",\n'
     '  "action": {\n'
     '    "type": "ACTION_TYPE",\n'
     '    "params": {}\n'
     "  }\n"
     "}\n\n"
     "Supported action types and params:\n"
-    "- START_TIMER: params: {\"duration_minutes\": <int>}\n"
+    "- START_TIMER: params: {\"duration_minutes\": <exact integer requested>}\n"
     "- NAVIGATE: params: {\"screen\": \"home\"|\"tasks\"|\"habits\"|\"timer\"|\"focus_analysis\"|\"distractions\"|\"profile\"|\"settings\"}\n"
     "- EXPORT_DATA: params: {\"format\": \"all\"}\n"
     "- CREATE_TASK: params: {\"title\": \"<string>\", \"priority\": \"high\"|\"medium\"|\"low\", \"deadline\": \"<string or null>\"}\n"
@@ -146,14 +147,14 @@ def is_non_english(text: str) -> bool:
 def normalize_action(action_type: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     params = params if params is not None else {}
     act_type = action_type.strip().upper() if action_type else "NONE"
-    
+
     valid_types = {
         "START_TIMER", "NAVIGATE", "EXPORT_DATA",
         "CREATE_TASK", "EDIT_TASK", "COMPLETE_TASK",
         "CREATE_HABIT", "EDIT_HABIT", "COMPLETE_HABIT",
         "UPDATE_PROFILE", "NONE"
     }
-    
+
     if act_type in ("START_FOCUS_TIMER", "START_TIMER"):
         act_type = "START_TIMER"
         raw_dur = params.get("duration_minutes") or params.get("duration") or 25
@@ -167,14 +168,14 @@ def normalize_action(action_type: str, params: Optional[Dict[str, Any]] = None) 
     elif act_type in ("NAVIGATE_TAB", "NAVIGATE"):
         act_type = "NAVIGATE"
         raw_screen = str(params.get("screen") or params.get("route") or params.get("tab") or "home").lower()
-        if "task" in raw_screen:
+        if "focus_analysis" in raw_screen or "analysis" in raw_screen or "insight" in raw_screen or "analytic" in raw_screen:
+            screen = "focus_analysis"
+        elif "task" in raw_screen:
             screen = "tasks"
         elif "habit" in raw_screen:
             screen = "habits"
         elif "timer" in raw_screen or "focus" in raw_screen or "clock" in raw_screen:
             screen = "timer"
-        elif "insight" in raw_screen or "analytic" in raw_screen or "analysis" in raw_screen:
-            screen = "focus_analysis"
         elif "distract" in raw_screen or "block" in raw_screen:
             screen = "distractions"
         elif "profile" in raw_screen:
@@ -197,13 +198,13 @@ def normalize_action(action_type: str, params: Optional[Dict[str, Any]] = None) 
     else:
         if act_type not in valid_types:
             act_type = "NONE"
-            
+
     res: Dict[str, Any] = {
         "type": act_type,
         "params": params,
         "payload": params
     }
-    
+
     if "duration_minutes" in params:
         res["duration"] = int(params["duration_minutes"])
         res["mode"] = params.get("mode", "FOCUS")
@@ -216,25 +217,32 @@ def normalize_action(action_type: str, params: Optional[Dict[str, Any]] = None) 
         res["priority"] = params["priority"]
     if "category" in params:
         res["category"] = params["category"]
-        
+
     return res
 
 def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any], str]]:
     q_trimmed = user_query.strip()
     if not q_trimmed:
         return None
-        
-    q_lower = q_trimmed.lower()
-    
+
+    m_ctx = re.match(r'^\[(?:Active (?:User|FocusFlow)|Active FocusFlow App Context:?)([\s\S]*?)\]\s*\n?([\s\S]*)$', q_trimmed, re.IGNORECASE)
+    ctx_body = m_ctx.group(1).strip() if m_ctx else ""
+    if m_ctx:
+        q_trimmed = m_ctx.group(2).strip()
+    if not q_trimmed:
+        return None
+
+    q_lower = q_trimmed.lower().rstrip(".?!")
+
     if re.search(r'\b(?:bye\s*byee?|bye\b|goodbye|cya|catch\s+you\s+later|see\s+ya)\b', q_lower):
         return normalize_action("NONE", {}), "Bye byee! Great focus session today. Keep crushing it and lock in again soon!"
-        
+
     if re.search(r'\b(?:hello|hi\b|hey\b|what\'?s\s+up|wassup|yo\b)\b', q_lower) and len(q_lower.split()) <= 4:
         return normalize_action("NONE", {}), "Hey! Ready to lock in and get into flow state? What are we working on today?"
 
     if re.search(r'\b(?:fr|for\s+real|no\s+cap)\b', q_lower) and len(q_lower.split()) <= 4:
         return normalize_action("NONE", {}), "For real, no cap. Let's keep the streak compounding."
-        
+
     if re.search(r'\b(?:bet|say\s+less)\b', q_lower) and len(q_lower.split()) <= 4:
         return normalize_action("NONE", {}), "Bet. Say less - I got you covered."
 
@@ -263,69 +271,74 @@ def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any],
         act = normalize_action("START_TIMER", {"duration_minutes": dur, "mode": "FOCUS"})
         return act, f"Understood, locked in for {dur} minutes. Starting your timer now."
 
-    if "task" not in q_lower and "habit" not in q_lower:
+    has_timer_kw = any(k in q_lower for k in ["timer", "focus", "pomodoro", "session", "break", "countdown"])
+    m_timer_cmd = re.search(r'\b(?:start|set|run|begin|launch|activate)\b', q_lower)
+
+    if has_timer_kw and (m_timer_cmd or "min" in q_lower or "hour" in q_lower or re.search(r'\b(?:timer|session|break)\b', q_lower)) and "task" not in q_lower and "habit" not in q_lower and "screen" not in q_lower and "analysis" not in q_lower:
         m_hour = re.search(r'(\d+)\s*(?:hours?|hrs?|h)\b', q_lower)
         m_min = re.search(r'(\d+)\s*(?:mins?|minutes?|m)\b', q_lower)
-        has_timer_kw = any(k in q_lower for k in ["timer", "focus", "pomodoro", "session", "break", "countdown"])
-        m_timer_cmd = re.search(r'\b(?:start|set|run|begin|launch|activate)\b', q_lower)
-        
-        if (m_timer_cmd and has_timer_kw) or ((m_hour or m_min) and has_timer_kw):
-            dur = 25
-            if m_hour:
-                dur = int(m_hour.group(1)) * 60
-            elif m_min:
-                dur = int(m_min.group(1))
-            mode = "LONG_BREAK" if ("break" in q_lower and dur >= 15) else ("SHORT_BREAK" if "break" in q_lower else "FOCUS")
-            if "break" in q_lower and dur == 25 and not m_min and not m_hour:
-                dur = 5
-            dur = max(1, min(720, dur))
-            act = normalize_action("START_TIMER", {"duration_minutes": dur, "mode": mode})
-            label = "focus session" if mode == "FOCUS" else "break"
-            return act, f"Started a {dur}-minute {label} for you. Lock in!"
+        m_num = re.search(r'\b(?:for|to|of)?\s*(\d+)\s*(?:mins?|minutes?|m)?\b', q_lower)
 
-    m_nav = re.search(r'\b(?:open|show|go\s+to|take\s+me\s+to|navigate\s+to|view)\s+(?:my\s+)?([a-zA-Z_\s]+)\b', q_lower)
-    if m_nav:
-        dest_str = m_nav.group(1).strip()
-        screen = None
-        if re.search(r'\b(?:home|dashboard)\b', dest_str):
-            screen = "home"
-        elif re.search(r'\b(?:tasks?|task\s+manager)\b', dest_str):
-            screen = "tasks"
-        elif re.search(r'\b(?:habits?)\b', dest_str):
-            screen = "habits"
-        elif re.search(r'\b(?:timers?|focus\s+timer|clock)\b', dest_str):
-            screen = "timer"
-        elif re.search(r'\b(?:focus\s*analysis|analysis|insights?|analytics?)\b', dest_str):
-            screen = "focus_analysis"
-        elif re.search(r'\b(?:distractions?|blocked\s+apps?)\b', dest_str):
-            screen = "distractions"
-        elif re.search(r'\b(?:profiles?)\b', dest_str):
-            screen = "profile"
-        elif re.search(r'\b(?:settings?)\b', dest_str):
-            screen = "settings"
-            
-        if screen:
-            act = normalize_action("NAVIGATE", {"screen": screen})
-            return act, f"Navigating to {screen}."
+        dur = 25
+        if m_hour:
+            dur = int(m_hour.group(1)) * 60
+        elif m_min:
+            dur = int(m_min.group(1))
+        elif m_num and int(m_num.group(1)) > 0 and int(m_num.group(1)) <= 720:
+            dur = int(m_num.group(1))
+
+        mode = "LONG_BREAK" if ("break" in q_lower and dur >= 15) else ("SHORT_BREAK" if "break" in q_lower else "FOCUS")
+        if "break" in q_lower and dur == 25 and not m_min and not m_hour:
+            dur = 5
+        dur = max(1, min(720, dur))
+        act = normalize_action("START_TIMER", {"duration_minutes": dur, "mode": mode})
+        label = "focus session" if mode == "FOCUS" else "break"
+        return act, f"Started a {dur}-minute {label} for you. Lock in!"
+
+    m_nav = re.search(r'\b(?:open|show|go\s+to|take\s+me\s+to|navigate\s+to|view|switch\s+to)\s+(?:my\s+|the\s+)?([a-zA-Z_\s]+)\b', q_lower)
+    dest_str = m_nav.group(1).strip() if m_nav else q_lower
+    screen = None
+    if re.search(r'\b(?:focus\s*analysis|analysis|insights?|analytics?)\b', dest_str):
+        screen = "focus_analysis"
+    elif re.search(r'\b(?:home|dashboard)\b', dest_str):
+        screen = "home"
+    elif re.search(r'\b(?:tasks?|task\s+(?:manager|screen))\b', dest_str):
+        screen = "tasks"
+    elif re.search(r'\b(?:habits?|hbait\w*)\b', dest_str):
+        screen = "habits"
+    elif re.search(r'\b(?:timers?|focus(?:\s+screen|\s+timer)?|clock|pomodoro)\b', dest_str):
+        screen = "timer"
+    elif re.search(r'\b(?:distractions?|blocked\s+apps?)\b', dest_str):
+        screen = "distractions"
+    elif re.search(r'\b(?:profiles?)\b', dest_str):
+        screen = "profile"
+    elif re.search(r'\b(?:settings?)\b', dest_str):
+        screen = "settings"
+
+    if screen and (m_nav or "screen" in q_lower or q_lower in ("home", "tasks", "habits", "timer", "profile", "settings", "insights", "analytics", "focus")):
+        act = normalize_action("NAVIGATE", {"screen": screen})
+        return act, f"Navigating to {screen}."
 
     if re.search(r'\b(?:export|backup|download)\s+(?:all\s+)?(?:productivity\s+)?(?:data|history|records)\b', q_lower):
         act = normalize_action("EXPORT_DATA", {"format": "all"})
         return act, "Exporting your complete productivity data."
 
-    m_edit_task = re.search(r'\b(?:edit|rename|change|update)\s+task\s+[\'"]?([^\'"]+?)[\'"]?\s+(?:to|as)\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    m_edit_task = re.search(r'\b(?:edit|rename|change|update)\s+task\s+[\'"]?([^\'"]+?)[\'"]?\s+(?:to|as)\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed.rstrip(".?!"), re.IGNORECASE)
     if m_edit_task:
         old_t = m_edit_task.group(1).strip().strip(".'\"")
         new_t = m_edit_task.group(2).strip().strip(".'\"")
         act = normalize_action("EDIT_TASK", {"title": old_t, "new_title": new_t, "deadline": None, "priority": None})
         return act, f"Updated task '{old_t}' to '{new_t}'."
 
-    m_comp_task = re.search(r'\b(?:complete|finish|done|mark\s+complete|check\s+off)\s+(?:task\s+)?[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    m_comp_task = re.search(r'\b(?:complete|finish|done|check\s+off|mark\s+complete|mark\s+done)\s+(?:a\s+|the\s+)?task\s+[\'"]?([^\'"]+?)(?:\s+as\s+(?:complete|done))?$', q_trimmed.rstrip(".?!"), re.IGNORECASE)
+    if not m_comp_task:
+        m_comp_task = re.search(r'\bmark\s+(?:a\s+|the\s+)?task\s+[\'"]?([^\'"]+?)[\'"]?\s+(?:as\s+)?(?:complete|completed|done)\b', q_trimmed.rstrip(".?!"), re.IGNORECASE)
     if m_comp_task and not any(k in m_comp_task.group(1).lower() for k in ["habit", "timer"]):
         t_title = m_comp_task.group(1).strip().strip(".'\"")
         act = normalize_action("COMPLETE_TASK", {"title": t_title})
         return act, f"Marked task '{t_title}' as completed."
 
-    m_create_task = re.search(r'\b(?:create|add|new|schedule)\s+(?:a\s+)?task\s+(?:named|to|called)?\s*[\'"]?([^\'"]+?)[\'"]?(?:\s+with\s+(high|medium|low)\s+priority)?$', q_trimmed, re.IGNORECASE)
+    m_create_task = re.search(r'\b(?:set|create|add|new|schedule)\s+(?:a\s+)?task\s+(?:named|to|called)?\s*[\'"]?([^\'"]+?)(?:\s+with\s+(high|medium|low)\s+priority)?$', q_trimmed.rstrip(".?!"), re.IGNORECASE)
     if m_create_task:
         raw_title = m_create_task.group(1).strip().strip(".'\"")
         priority = "medium"
@@ -341,36 +354,69 @@ def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any],
         act = normalize_action("CREATE_TASK", {"title": raw_title, "priority": priority, "deadline": deadline})
         return act, f"Created task '{raw_title}' with {priority} priority."
 
-    m_edit_habit = re.search(r'\b(?:edit|rename|change|update)\s+habit\s+[\'"]?([^\'"]+?)[\'"]?\s+(?:to|as)\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    m_edit_habit = re.search(r'\b(?:edit|rename|change|update)\s+habit\s+[\'"]?([^\'"]+?)[\'"]?\s+(?:to|as)\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed.rstrip(".?!"), re.IGNORECASE)
     if m_edit_habit:
         old_h = m_edit_habit.group(1).strip().strip(".'\"")
         new_h = m_edit_habit.group(2).strip().strip(".'\"")
         act = normalize_action("EDIT_HABIT", {"title": old_h, "new_title": new_h})
         return act, f"Updated habit '{old_h}' to '{new_h}'."
 
-    m_comp_habit = re.search(r'\b(?:check\s+off|log|complete|done)\s+(?:habit\s+)?[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    m_comp_habit = re.search(r'\b(?:check\s+off|log|complete|done|mark\s+complete|mark\s+done)\s+(?:a\s+|the\s+)?habit\s+[\'"]?([^\'"]+?)(?:\s+as\s+(?:complete|done))?$', q_trimmed.rstrip(".?!"), re.IGNORECASE)
+    if not m_comp_habit:
+        m_comp_habit = re.search(r'\bmark\s+(?:a\s+|the\s+)?habit\s+[\'"]?([^\'"]+?)[\'"]?\s+(?:as\s+)?(?:complete|completed|done)\b', q_trimmed.rstrip(".?!"), re.IGNORECASE)
     if m_comp_habit and "task" not in q_lower and "timer" not in q_lower:
         h_title = m_comp_habit.group(1).strip().strip(".'\"")
         act = normalize_action("COMPLETE_HABIT", {"title": h_title})
         return act, f"Checked off habit '{h_title}' for today."
 
-    m_create_habit = re.search(r'\b(?:create|add|new|track|build)\s+(?:a\s+)?habit\s+(?:named|to|called)?\s*[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    m_create_habit = re.search(r'\b(?:set|create|add|new|track|build)\s+(?:a\s+)?habit\s+(?:named|to|called)?\s*[\'"]?([^\'"]+?)$', q_trimmed.rstrip(".?!"), re.IGNORECASE)
     if m_create_habit:
         h_title = m_create_habit.group(1).strip().strip(".'\"")
         act = normalize_action("CREATE_HABIT", {"title": h_title})
         return act, f"Created the habit '{h_title}'."
 
-    m_name = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?name\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    m_name = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?name\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed.rstrip(".?!"), re.IGNORECASE)
     if m_name:
         new_name = m_name.group(1).strip().strip(".'\"")
         act = normalize_action("UPDATE_PROFILE", {"name": new_name, "bio": None})
         return act, f"Updated your profile name to '{new_name}'."
 
-    m_bio = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?bio\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed, re.IGNORECASE)
+    m_bio = re.search(r'\b(?:change|update|set)\s+(?:my\s+)?bio\s+to\s+[\'"]?([^\'"]+?)[\'"]?$', q_trimmed.rstrip(".?!"), re.IGNORECASE)
     if m_bio:
         new_bio = m_bio.group(1).strip().strip(".'\"")
         act = normalize_action("UPDATE_PROFILE", {"name": None, "bio": new_bio})
         return act, "Updated your profile bio."
+
+    if any(q_word in q_lower for q_word in ["streak", "focus time", "how much focus", "how many tasks", "what tasks", "my habits", "what habits", "distraction", "screen time"]):
+        if "streak" in q_lower:
+            m_st = re.search(r'Streak:\s*(\d+\s*days?)', ctx_body)
+            if m_st:
+                return normalize_action("NONE", {}), f"Your current streak is {m_st.group(1)}. Keep up the consistent focus!"
+            return normalize_action("NONE", {}), "I don't have your current streak data in this context."
+
+        if "focus" in q_lower and ("time" in q_lower or "how much" in q_lower or "today" in q_lower or "stat" in q_lower):
+            m_fc = re.search(r'Focus Today:\s*(.*?)(?=,\s*Tasks:|,\s*Habits:|$)', ctx_body)
+            if m_fc:
+                return normalize_action("NONE", {}), f"You have logged {m_fc.group(1).strip()} of focus today."
+            return normalize_action("NONE", {}), "I don't see any logged focus time for today in your current data."
+
+        if "task" in q_lower and ("what" in q_lower or "how many" in q_lower or "list" in q_lower or "pending" in q_lower):
+            m_tk = re.search(r'Tasks:\s*(.*?)(?=,\s*Habits:|,\s*Distractions:|$)', ctx_body)
+            if m_tk:
+                return normalize_action("NONE", {}), f"Here are your tasks: {m_tk.group(1).strip()}."
+            return normalize_action("NONE", {}), "I don't have your tasks list in the current session context."
+
+        if "habit" in q_lower and ("what" in q_lower or "how many" in q_lower or "list" in q_lower or "active" in q_lower):
+            m_hb = re.search(r'Habits:\s*(.*?)(?=,\s*Distractions:|$)', ctx_body)
+            if m_hb:
+                return normalize_action("NONE", {}), f"Your habits: {m_hb.group(1).strip()}."
+            return normalize_action("NONE", {}), "I don't have your active habits data in this context."
+
+        if "distract" in q_lower or "screen time" in q_lower:
+            m_ds = re.search(r'Distractions:\s*([^\]]+)', ctx_body)
+            if m_ds:
+                return normalize_action("NONE", {}), f"Today's distractions: {m_ds.group(1).strip()}."
+            return normalize_action("NONE", {}), "No distraction statistics were found in your current data."
 
     return None
 
@@ -378,7 +424,7 @@ def parse_llm_json_or_text(raw_text: str, original_query: str) -> Tuple[str, Dic
     cleaned = raw_text.replace("<|im_end|>", "").replace("<|im_start|>", "").strip()
     cleaned = emoji_pattern.sub('', cleaned).strip()
     cleaned = html.unescape(cleaned)
-    
+
     json_candidate = cleaned
     m_block = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', cleaned, re.IGNORECASE)
     if m_block:
@@ -387,13 +433,13 @@ def parse_llm_json_or_text(raw_text: str, original_query: str) -> Tuple[str, Dic
         m_brace = re.search(r'(\{[\s\S]*\})', cleaned)
         if m_brace:
             json_candidate = m_brace.group(1).strip()
-            
+
     try:
         data = json.loads(json_candidate)
         if isinstance(data, dict) and "reply" in data:
             reply_str = str(data["reply"]).strip()
             action_data = data.get("action")
-            if isinstance(action_data, dict) and "type" in action_data:
+            if isinstance(action_data, dict) and "type" in action_data and action_data["type"] != "NONE":
                 act = normalize_action(action_data["type"], action_data.get("params") or {})
                 return reply_str, act
             extracted = extract_actions_and_reply(original_query)
@@ -402,16 +448,16 @@ def parse_llm_json_or_text(raw_text: str, original_query: str) -> Tuple[str, Dic
             return reply_str, normalize_action("NONE", {})
     except Exception:
         pass
-        
+
     extracted = extract_actions_and_reply(original_query)
     if extracted:
         return cleaned, extracted[0]
-        
+
     return cleaned, normalize_action("NONE", {})
 
 def make_response_dict(reply_text: str, action_obj: Dict[str, Any]) -> Dict[str, Any]:
     clean_reply = emoji_pattern.sub('', html.unescape(reply_text)).strip()
-    has_action = action_obj.get("type") and action_obj["type"] != "NONE"
+    has_action = bool(action_obj.get("type")) and action_obj["type"] != "NONE"
     actions_list = [action_obj] if has_action else []
     return {
         "status": "success",
@@ -434,9 +480,9 @@ class ChatCompletionRequest(BaseModel):
     model: Optional[str] = Field("groot", max_length=100)
     messages: Optional[List[Message]] = None
     prompt: Optional[str] = Field(None, max_length=4000)
-    temperature: Optional[float] = Field(0.4, ge=0.0, le=2.0)
-    max_tokens: Optional[int] = Field(600, ge=1, le=2048)
-    top_p: Optional[float] = Field(0.9, ge=0.0, le=1.0)
+    temperature: Optional[float] = Field(0.2, ge=0.0, le=2.0)
+    max_tokens: Optional[int] = Field(220, ge=1, le=2048)
+    top_p: Optional[float] = Field(0.85, ge=0.0, le=1.0)
 
 def format_app_context(ctx: Optional[Union[Dict[str, Any], str]]) -> str:
     if not ctx:
@@ -488,28 +534,37 @@ def build_prompt_from_messages(messages: List[Union[Message, dict]]) -> str:
     parts = []
     if not has_system:
         parts.append(f"<|im_start|>system\n{SYSTEM_PERSONA}<|im_end|>")
-    
+
     for m in messages:
         role = m.role if isinstance(m, Message) else m.get("role", "user")
         content = m.content if isinstance(m, Message) else m.get("content", "")
         parts.append(f"<|im_start|>{role}\n{content}<|im_end|>")
-    
+
     parts.append("<|im_start|>assistant\n")
     return "\n".join(parts)
 
-def generate_response(prompt_text: str, original_query: str, max_tokens: int = 350, temperature: float = 0.4, top_p: float = 0.9) -> Tuple[str, Dict[str, Any]]:
+def generate_response(prompt_text: str, original_query: str, max_tokens: int = 220, temperature: float = 0.2, top_p: float = 0.85) -> Tuple[str, Dict[str, Any]]:
     api_key = os.environ.get("GEMINI_API_KEY", "").strip() or GEMINI_API_KEY
     if api_key:
         candidate_models = ["gemini-3.8-flash", "gemini-2.5-flash-preview", "gemini-2.5-flash", "gemini-1.5-flash"]
+        generation_config = {
+            "temperature": min(temperature, 0.3),
+            "top_p": min(top_p, 0.85),
+            "max_output_tokens": min(max_tokens, 220)
+        }
         for model_name in candidate_models:
             try:
                 genai.configure(api_key=api_key)
                 try:
-                    gemini_model = genai.GenerativeModel(model_name=model_name, system_instruction=SYSTEM_PERSONA)
+                    gemini_model = genai.GenerativeModel(
+                        model_name=model_name,
+                        system_instruction=SYSTEM_PERSONA,
+                        generation_config=generation_config
+                    )
                 except Exception:
                     gemini_model = genai.GenerativeModel(model_name=model_name)
-                    
-                resp = gemini_model.generate_content(prompt_text)
+
+                resp = gemini_model.generate_content(prompt_text, generation_config=generation_config)
                 if resp and resp.text:
                     reply, action_obj = parse_llm_json_or_text(resp.text.strip(), original_query)
                     if reply:
@@ -519,6 +574,10 @@ def generate_response(prompt_text: str, original_query: str, max_tokens: int = 3
     else:
         print("[GrootAI] GEMINI_API_KEY is not set or empty in environment.")
 
+    extracted = extract_actions_and_reply(original_query)
+    if extracted:
+        return extracted[1], extracted[0]
+
     if model is not None and tokenizer is not None:
         try:
             inputs = tokenizer(prompt_text, return_tensors="pt")
@@ -527,7 +586,7 @@ def generate_response(prompt_text: str, original_query: str, max_tokens: int = 3
             with torch.inference_mode():
                 outputs = model.generate(
                     **inputs,
-                    max_new_tokens=min(max_tokens, 300),
+                    max_new_tokens=min(max_tokens, 150),
                     temperature=temperature,
                     top_p=top_p,
                     repetition_penalty=1.12,
@@ -543,16 +602,12 @@ def generate_response(prompt_text: str, original_query: str, max_tokens: int = 3
         except Exception as e:
             print(f"[GrootAI] Local model generation error: {e}")
 
-    extracted = extract_actions_and_reply(original_query)
-    if extracted:
-        return extracted[1], extracted[0]
-
     return "I am Groot, your focus and productivity collaborator. How can we level up your flow state today?", normalize_action("NONE", {})
 
 @app.get("/")
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "Groot AI Engine", "ready": True}
+    return {"status": "ok"}
 
 @app.get("/chat")
 @app.get("/groot/chat")
@@ -564,7 +619,7 @@ def chat_endpoint_get():
 def chat_endpoint(req: ChatRequest):
     user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
     user_msg = html.unescape(user_msg.strip())
-    
+
     if is_non_english(user_msg):
         return make_response_dict(ENGLISH_REFUSAL_MESSAGE, normalize_action("NONE", {}))
 
@@ -581,7 +636,7 @@ def chat_endpoint(req: ChatRequest):
         Message(role="user", content=full_prompt)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    llm_reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=350, temperature=0.3)
+    llm_reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=220, temperature=0.2)
     return make_response_dict(llm_reply, action_obj)
 
 @app.post("/v1/chat/completions")
@@ -594,7 +649,7 @@ def chat_completions(req: ChatCompletionRequest):
             break
     if not user_content and req.prompt:
         user_content = req.prompt
-    
+
     user_content = html.unescape(user_content.strip()) if user_content else ""
 
     if user_content and is_non_english(user_content):
@@ -627,12 +682,12 @@ def chat_completions(req: ChatCompletionRequest):
             Message(role="system", content=SYSTEM_PERSONA),
             Message(role="user", content="Hello Groot.")
         ]
-    
+
     prompt_text = build_prompt_from_messages(messages)
-    max_tokens = min(req.max_tokens or 350, 500)
-    temp = req.temperature if req.temperature is not None else 0.4
-    top_p = req.top_p if req.top_p is not None else 0.9
-    
+    max_tokens = min(req.max_tokens or 220, 350)
+    temp = req.temperature if req.temperature is not None else 0.2
+    top_p = req.top_p if req.top_p is not None else 0.85
+
     reply, action_obj = generate_response(prompt_text, user_content, max_tokens=max_tokens, temperature=temp, top_p=top_p)
     res = make_response_dict(reply, action_obj)
     return {
@@ -647,7 +702,7 @@ def chat_completions(req: ChatCompletionRequest):
 def ask_groot(req: SimpleChatRequest):
     user_msg = req.message or req.prompt or req.query or req.text or "Hello Groot."
     user_msg = html.unescape(user_msg.strip())
-    
+
     if is_non_english(user_msg):
         return make_response_dict(ENGLISH_REFUSAL_MESSAGE, normalize_action("NONE", {}))
 
@@ -664,7 +719,7 @@ def ask_groot(req: SimpleChatRequest):
         Message(role="user", content=full_prompt)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=350, temperature=0.3)
+    reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=220, temperature=0.2)
     return make_response_dict(reply, action_obj)
 
 @app.post("/predict")
@@ -675,7 +730,7 @@ def predict(req: SimpleChatRequest):
 def generate(req: dict):
     user_msg = req.get("prompt") or req.get("message") or req.get("query") or ""
     user_msg = html.unescape(user_msg.strip())
-    
+
     extracted = extract_actions_and_reply(user_msg)
     if extracted:
         action_obj, reply_text = extracted
@@ -690,8 +745,8 @@ def generate(req: dict):
             Message(role="user", content=user_msg or "Hello Groot.")
         ]
         prompt_text = build_prompt_from_messages(messages)
-    
-    reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=350, temperature=0.4)
+
+    reply, action_obj = generate_response(prompt_text, user_msg, max_tokens=220, temperature=0.2)
     return make_response_dict(reply, action_obj)
 
 class TaskBreakdownRequest(BaseModel):
@@ -706,7 +761,7 @@ def breakdown_task(req: TaskBreakdownRequest):
     task_name = html.unescape(raw_title.strip())
     if not task_name:
         return {"status": "error", "success": False, "message": "Task title is required", "task": "", "subtasks": []}
-    
+
     subtasks = []
     try:
         user_prompt = f"Break down this task into 3 or 4 short actionable steps: '{task_name}'. Output each step on its own line without numbering or bullets."
@@ -715,7 +770,7 @@ def breakdown_task(req: TaskBreakdownRequest):
             Message(role="user", content=user_prompt)
         ]
         prompt_text = build_prompt_from_messages(messages)
-        raw_output, _ = generate_response(prompt_text, user_prompt, max_tokens=140, temperature=0.3)
+        raw_output, _ = generate_response(prompt_text, user_prompt, max_tokens=140, temperature=0.2)
         lines = [html.unescape(line.strip().lstrip("-*1234567890. ")) for line in raw_output.splitlines() if line.strip()]
         for l in lines:
             if len(l) > 3 and not l.lower().startswith("here are") and not l.lower().startswith("subtask"):
@@ -754,7 +809,7 @@ def create_study_plan(req: StudyPlanRequest):
         Message(role="user", content=user_prompt)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply, _ = generate_response(prompt_text, user_prompt, max_tokens=260, temperature=0.3)
+    reply, _ = generate_response(prompt_text, user_prompt, max_tokens=220, temperature=0.2)
     unescaped_reply = html.unescape(reply)
     return {
         "status": "success",
@@ -772,7 +827,7 @@ def focus_coaching(req: FocusCoachingRequest):
     distractions = req.distractions_count or 0
     streak = req.streak_days or 0
     query = html.unescape((req.user_query or "How can I improve my focus score today?").strip())
-    
+
     coaching_prompt = (
         f"User performance data: {mins} focus minutes logged, {distractions} distraction interruptions, "
         f"and an active streak of {streak} days. Question: '{query}'. "
@@ -784,7 +839,7 @@ def focus_coaching(req: FocusCoachingRequest):
         Message(role="user", content=coaching_prompt)
     ]
     prompt_text = build_prompt_from_messages(messages)
-    reply, _ = generate_response(prompt_text, query, max_tokens=220, temperature=0.3)
+    reply, _ = generate_response(prompt_text, query, max_tokens=200, temperature=0.2)
     unescaped_reply = html.unescape(reply)
     return {
         "status": "success",

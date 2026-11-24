@@ -18,15 +18,19 @@ try {
         SELECT DISTINCT activity_date FROM (
             SELECT DATE(created_at) as activity_date 
             FROM focus_sessions 
-            WHERE user_id = :uid1 AND status = 'completed' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+            WHERE user_id = :uid1 AND status = 'completed' AND LOWER(session_type) NOT LIKE '%break%' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
             UNION
             SELECT completed_date as activity_date 
             FROM habit_logs 
             WHERE user_id = :uid2 AND completed_date >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+            UNION
+            SELECT DATE(created_at) as activity_date
+            FROM tasks
+            WHERE user_id = :uid3 AND is_completed = 1 AND created_at >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
         ) combined
         ORDER BY activity_date DESC
     ");
-    $stmt->execute([':uid1' => $userId, ':uid2' => $userId]);
+    $stmt->execute([':uid1' => $userId, ':uid2' => $userId, ':uid3' => $userId]);
     $dates = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
     $currentStreak = 0;
@@ -35,21 +39,31 @@ try {
     $lastActiveDate = $dates[0] ?? null;
 
     if (!empty($dates)) {
-        $today = new DateTime('today');
-        $yesterday = (new DateTime('today'))->modify('-1 day');
-        $checkDate = new DateTime($dates[0]);
+        $todayStr = (new DateTime('today'))->format('Y-m-d');
+        $yesterdayStr = (new DateTime('today'))->modify('-1 day')->format('Y-m-d');
 
-        if ($checkDate == $today || $checkDate == $yesterday) {
-            $expected = clone $checkDate;
+        if ($dates[0] === $todayStr) {
+            $expected = new DateTime('today');
             foreach ($dates as $d) {
-                $cur = new DateTime($d);
-                if ($cur->format('Y-m-d') === $expected->format('Y-m-d')) {
+                if ($d === $expected->format('Y-m-d')) {
                     $currentStreak++;
                     $expected->modify('-1 day');
                 } else {
                     break;
                 }
             }
+        } else if ($dates[0] === $yesterdayStr) {
+            $expected = (new DateTime('today'))->modify('-1 day');
+            foreach ($dates as $d) {
+                if ($d === $expected->format('Y-m-d')) {
+                    $currentStreak++;
+                    $expected->modify('-1 day');
+                } else {
+                    break;
+                }
+            }
+        } else {
+            $currentStreak = 0;
         }
 
         $tempStreak = 0;
@@ -92,8 +106,8 @@ try {
         'status' => 'success',
         'data' => [
             'user_id' => $userId,
-            'current_streak' => max(1, $currentStreak),
-            'longest_streak' => max(1, $longestStreak),
+            'current_streak' => $currentStreak,
+            'longest_streak' => $longestStreak,
             'total_active_days' => $totalActiveDays,
             'last_active_date' => $lastActiveDate
         ]

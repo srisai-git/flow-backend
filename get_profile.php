@@ -61,16 +61,52 @@ try {
     $taskStmt->execute([':uid' => $userId]);
     $completedTasksCount = (int)$taskStmt->fetchColumn();
 
-    // 4. Calculate current streak (max habit streak or consecutive days)
-    $streakStmt = $conn->prepare("
-        SELECT COALESCE(MAX(streak_count), 0)
-        FROM habits
-        WHERE user_id = :uid
+    $streakDatesStmt = $conn->prepare("
+        SELECT DISTINCT activity_date FROM (
+            SELECT DATE(created_at) as activity_date 
+            FROM focus_sessions 
+            WHERE user_id = :uid1 AND status = 'completed' AND LOWER(session_type) NOT LIKE '%break%' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+            UNION
+            SELECT completed_date as activity_date 
+            FROM habit_logs 
+            WHERE user_id = :uid2 AND completed_date >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+            UNION
+            SELECT DATE(created_at) as activity_date
+            FROM tasks
+            WHERE user_id = :uid3 AND is_completed = 1 AND created_at >= DATE_SUB(CURDATE(), INTERVAL 365 DAY)
+        ) combined
+        ORDER BY activity_date DESC
     ");
-    $streakStmt->execute([':uid' => $userId]);
-    $currentStreak = (int)$streakStmt->fetchColumn();
-    if ($currentStreak <= 0) {
-        $currentStreak = 1; // Default minimum streak
+    $streakDatesStmt->execute([':uid1' => $userId, ':uid2' => $userId, ':uid3' => $userId]);
+    $streakDates = $streakDatesStmt->fetchAll(PDO::FETCH_COLUMN);
+
+    $currentStreak = 0;
+    if (!empty($streakDates)) {
+        $todayStr = (new DateTime('today'))->format('Y-m-d');
+        $yesterdayStr = (new DateTime('today'))->modify('-1 day')->format('Y-m-d');
+        if ($streakDates[0] === $todayStr) {
+            $expected = new DateTime('today');
+            foreach ($streakDates as $d) {
+                if ($d === $expected->format('Y-m-d')) {
+                    $currentStreak++;
+                    $expected->modify('-1 day');
+                } else {
+                    break;
+                }
+            }
+        } else if ($streakDates[0] === $yesterdayStr) {
+            $expected = (new DateTime('today'))->modify('-1 day');
+            foreach ($streakDates as $d) {
+                if ($d === $expected->format('Y-m-d')) {
+                    $currentStreak++;
+                    $expected->modify('-1 day');
+                } else {
+                    break;
+                }
+            }
+        } else {
+            $currentStreak = 0;
+        }
     }
 
     // 5. User preferences (daily focus target and reminders)
