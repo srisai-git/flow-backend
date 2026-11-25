@@ -104,6 +104,15 @@ SYSTEM_PERSONA = (
     "You are sharp, encouraging, concise, and fluent in modern natural conversational English.\n"
     "You NEVER give robotic disclaimers, capability refusals, or state what you cannot do (never say 'As an AI' or 'I cannot sing or eat' or 'I am an AI'). You happily chat naturally, answer questions directly and concisely, give study and coding guidance, and warmly acknowledge greetings like 'hi', 'hello', 'hey', 'yo', and 'good morning'.\n"
     "When greeted with 'hi', 'hello', 'hey', 'yo', or 'good morning', respond with a warm, friendly, natural reply like 'Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task.' with action type NONE.\n"
+    "You have complete knowledge of FocusFlow features and rules:\n"
+    "- Focus Timer: Custom duration of any minutes (1-720m) with FOCUS, SHORT_BREAK, and LONG_BREAK modes.\n"
+    "- Strict Focus Mode: AccessibilityService blocker with zero overlay permissions, immediately returning home on blocked app launch with 150ms and 350ms follow-up enforcement.\n"
+    "- Tasks: Supports high, medium, and low priority, exact scheduled deadline dates and times, and real-time completion state.\n"
+    "- Habits: Pure daily frequency without day-of-week selectors, dotted momentum graph, and streak tracking based only on real productivity actions (zero streak increment on login alone).\n"
+    "- Distraction Analysis: Single-foreground UsageStats tracking with minimal horizontal bars, filtering non-interactive/keyguard states and requiring 1+ min usage.\n"
+    "- Focus Time Analysis: Today focus stats + Past 7 Days Focus bar chart with threshold goal line and reactive weekly focus goal.\n"
+    "- Profile & Settings: Avatar selection, daily focus goal synced to MySQL backend, mini streak calendar, and instant reactive DataStore updates.\n"
+    "- Full Export: Complete productivity history and chat transcript export to CSV/JSON.\n"
     "You answer user questions directly, accurately, and concisely using the live FocusFlow user context provided in the request (such as pending and completed tasks, active habits and streaks, timer status, distraction logs, and daily productivity stats).\n"
     "Strict Grounding and Honesty: Never hallucinate user stats, metrics, habits, tasks, or capabilities. If the user asks about data not present in their context or something you genuinely do not know, clearly and honestly admit that you do not have that data or do not know, instead of making up numbers or answers.\n"
     "You strictly output zero emojis.\n\n"
@@ -244,6 +253,9 @@ def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any],
     ctx_body = m_ctx.group(1).strip() if m_ctx else ""
     if m_ctx:
         q_trimmed = m_ctx.group(2).strip()
+    m_kn = re.match(r'^\[App Knowledge:([\s\S]*?)\]\s*\n?([\s\S]*)$', q_trimmed, re.IGNORECASE)
+    if m_kn:
+        q_trimmed = m_kn.group(2).strip()
     if not q_trimmed:
         return None
 
@@ -441,6 +453,18 @@ def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any],
         act = normalize_action("UPDATE_PROFILE", {"name": None, "bio": new_bio})
         return act, "Updated your profile bio."
 
+    if any(k in q_lower for k in ["strict focus", "accessibility service", "how strict mode", "strict mode work", "block app"]):
+        return normalize_action("NONE", {}), "Strict Focus Mode runs directly via FocusBlockerAccessibilityService with zero overlay permissions required. When active, opening any blocked app immediately redirects you back to the home screen with 150ms and 350ms follow-up checks."
+
+    if any(k in q_lower for k in ["distraction analysis", "how distraction", "usage stat", "screen time work", "track distraction"]):
+        return normalize_action("NONE", {}), "Distraction Analysis uses UsageStatsManager with a strict single-foreground tracker. It ignores background events and keyguard states, displaying minimal horizontal bars for apps used for at least one minute."
+
+    if any(k in q_lower for k in ["past 7", "focus time analysis", "past seven", "weekly focus goal", "7 days focus"]):
+        return normalize_action("NONE", {}), "Focus Time Analysis provides an exact today breakdown alongside the Past 7 Days Focus bar chart with a threshold goal line and a reactive weekly goal target."
+
+    if any(k in q_lower for k in ["momentum", "habit graph", "habit tracking", "how habit"]):
+        return normalize_action("NONE", {}), "Habits operate on a pure daily cycle without day-of-week selectors, featuring a dotted momentum graph and real-time streak validation requiring real actions."
+
     if any(q_word in q_lower for q_word in ["streak", "focus time", "how much focus", "how many tasks", "what tasks", "my habits", "what habits", "distraction", "screen time"]):
         if "streak" in q_lower:
             m_st = re.search(r'Streak:\s*(\d+\s*days?)', ctx_body)
@@ -538,12 +562,15 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = Field(220, ge=1, le=2048)
     top_p: Optional[float] = Field(0.85, ge=0.0, le=1.0)
 
-def format_app_context(ctx: Optional[Union[Dict[str, Any], str]]) -> str:
-    if not ctx:
-        return ""
-    if isinstance(ctx, dict):
-        return f"\n[Active FocusFlow App Context: {json.dumps(ctx)}]\n"
-    return f"\n[Active FocusFlow App Context: {ctx}]\n"
+def format_app_context(ctx: Optional[Union[Dict[str, Any], str]], knowledge: Optional[Union[Dict[str, Any], str]] = None) -> str:
+    parts = []
+    if ctx:
+        c_str = json.dumps(ctx) if isinstance(ctx, dict) else str(ctx)
+        parts.append(f"[Active FocusFlow App Context: {c_str}]")
+    if knowledge:
+        k_str = json.dumps(knowledge) if isinstance(knowledge, dict) else str(knowledge)
+        parts.append(f"[App Knowledge: {k_str}]")
+    return ("\n".join(parts) + "\n") if parts else ""
 
 class SimpleChatRequest(BaseModel):
     message: Optional[str] = Field(None, max_length=4000)
@@ -551,6 +578,7 @@ class SimpleChatRequest(BaseModel):
     query: Optional[str] = Field(None, max_length=4000)
     text: Optional[str] = Field(None, max_length=4000)
     app_context: Optional[Union[Dict[str, Any], str]] = None
+    app_knowledge: Optional[Union[Dict[str, Any], str]] = None
 
     class Config:
         extra = "allow"
@@ -563,6 +591,7 @@ class ChatRequest(BaseModel):
     history: Optional[List[Any]] = None
     user_id: Optional[int] = 1
     app_context: Optional[Union[Dict[str, Any], str]] = None
+    app_knowledge: Optional[Union[Dict[str, Any], str]] = None
 
     class Config:
         extra = "allow"
@@ -682,7 +711,7 @@ def chat_endpoint(req: ChatRequest):
         action_obj, reply_text = extracted
         return make_response_dict(reply_text, action_obj)
 
-    ctx_str = format_app_context(req.app_context)
+    ctx_str = format_app_context(req.app_context, req.app_knowledge)
     full_prompt = f"{ctx_str}{user_msg}" if ctx_str else user_msg
 
     messages = [
@@ -765,7 +794,7 @@ def ask_groot(req: SimpleChatRequest):
         action_obj, reply_text = extracted
         return make_response_dict(reply_text, action_obj)
 
-    ctx_str = format_app_context(req.app_context)
+    ctx_str = format_app_context(req.app_context, req.app_knowledge)
     full_prompt = f"{ctx_str}{user_msg}" if ctx_str else user_msg
 
     messages = [
