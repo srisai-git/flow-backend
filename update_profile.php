@@ -2,12 +2,13 @@
 // update_profile.php
 require_once __DIR__ . '/config/db.php';
 require_once __DIR__ . '/config/migrations.php';
+require_once __DIR__ . '/preferences/setup_table.php';
 
-// Fast migration check
 $migrationFlag = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'flow_migrated_v3';
 if (!file_exists($migrationFlag)) {
     try {
         runAllMigrations($conn);
+        ensurePreferencesTableExists($conn);
         @touch($migrationFlag);
     } catch (PDOException $e) {
         error_log("Update Profile Migration Notice: " . $e->getMessage());
@@ -121,42 +122,139 @@ try {
         $updateStmt->execute($params);
     }
 
-    // Handle user_preferences parameters (reminders_enabled, daily_focus_goal_minutes, preferred_focus_duration)
-    if (isset($input['reminders_enabled']) || isset($_POST['reminders_enabled'])) {
-        $reminders = (int)($input['reminders_enabled'] ?? $_POST['reminders_enabled']);
-        $prefStmt = $conn->prepare("
-            INSERT INTO user_preferences (user_id, reminders_enabled) 
-            VALUES (:uid, :reminders)
-            ON DUPLICATE KEY UPDATE reminders_enabled = VALUES(reminders_enabled)
-        ");
-        $prefStmt->execute([':uid' => $userId, ':reminders' => $reminders]);
+    $prefsInput = $input['preferences'] ?? $_POST['preferences'] ?? null;
+    if (is_string($prefsInput)) {
+        $decoded = json_decode($prefsInput, true);
+        if (is_array($decoded)) {
+            $prefsInput = $decoded;
+        }
     }
 
-    if (isset($input['daily_focus_goal_minutes']) || isset($_POST['daily_focus_goal_minutes'])) {
-        $goalMins = (int)($input['daily_focus_goal_minutes'] ?? $_POST['daily_focus_goal_minutes']);
-        $prefStmt = $conn->prepare("
-            INSERT INTO user_preferences (user_id, daily_focus_goal_minutes) 
-            VALUES (:uid, :goal)
-            ON DUPLICATE KEY UPDATE daily_focus_goal_minutes = VALUES(daily_focus_goal_minutes)
-        ");
-        $prefStmt->execute([':uid' => $userId, ':goal' => $goalMins]);
-    }
+    $dailyGoal = null;
+    if (isset($input['daily_focus_goal_minutes'])) $dailyGoal = (int)$input['daily_focus_goal_minutes'];
+    elseif (isset($input['daily_focus_goal'])) $dailyGoal = (int)$input['daily_focus_goal'];
+    elseif (isset($_POST['daily_focus_goal_minutes'])) $dailyGoal = (int)$_POST['daily_focus_goal_minutes'];
+    elseif (isset($_POST['daily_focus_goal'])) $dailyGoal = (int)$_POST['daily_focus_goal'];
+    elseif (is_array($prefsInput) && isset($prefsInput['daily_focus_goal_minutes'])) $dailyGoal = (int)$prefsInput['daily_focus_goal_minutes'];
+    elseif (is_array($prefsInput) && isset($prefsInput['daily_focus_goal'])) $dailyGoal = (int)$prefsInput['daily_focus_goal'];
 
-    if (isset($input['preferred_focus_duration']) || isset($_POST['preferred_focus_duration'])) {
-        $blockMins = (int)($input['preferred_focus_duration'] ?? $_POST['preferred_focus_duration']);
-        $prefStmt = $conn->prepare("
-            INSERT INTO user_preferences (user_id, preferred_focus_duration) 
-            VALUES (:uid, :block)
-            ON DUPLICATE KEY UPDATE preferred_focus_duration = VALUES(preferred_focus_duration)
-        ");
-        $prefStmt->execute([':uid' => $userId, ':block' => $blockMins]);
-    }
+    $focusDuration = null;
+    if (isset($input['preferred_focus_duration'])) $focusDuration = (int)$input['preferred_focus_duration'];
+    elseif (isset($_POST['preferred_focus_duration'])) $focusDuration = (int)$_POST['preferred_focus_duration'];
+    elseif (is_array($prefsInput) && isset($prefsInput['preferred_focus_duration'])) $focusDuration = (int)$prefsInput['preferred_focus_duration'];
 
-    // Fetch updated user
+    $reminders = null;
+    if (isset($input['notifications_enabled'])) $reminders = (int)filter_var($input['notifications_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (isset($input['reminders_enabled'])) $reminders = (int)filter_var($input['reminders_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (isset($_POST['notifications_enabled'])) $reminders = (int)filter_var($_POST['notifications_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (isset($_POST['reminders_enabled'])) $reminders = (int)filter_var($_POST['reminders_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (is_array($prefsInput) && isset($prefsInput['notifications_enabled'])) $reminders = (int)filter_var($prefsInput['notifications_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (is_array($prefsInput) && isset($prefsInput['reminders_enabled'])) $reminders = (int)filter_var($prefsInput['reminders_enabled'], FILTER_VALIDATE_BOOLEAN);
+
+    $dailyReminder = null;
+    if (isset($input['daily_reminder_enabled'])) $dailyReminder = (int)filter_var($input['daily_reminder_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (isset($_POST['daily_reminder_enabled'])) $dailyReminder = (int)filter_var($_POST['daily_reminder_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (is_array($prefsInput) && isset($prefsInput['daily_reminder_enabled'])) $dailyReminder = (int)filter_var($prefsInput['daily_reminder_enabled'], FILTER_VALIDATE_BOOLEAN);
+
+    $deadlineReminder = null;
+    if (isset($input['deadline_reminder_enabled'])) $deadlineReminder = (int)filter_var($input['deadline_reminder_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (isset($_POST['deadline_reminder_enabled'])) $deadlineReminder = (int)filter_var($_POST['deadline_reminder_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (is_array($prefsInput) && isset($prefsInput['deadline_reminder_enabled'])) $deadlineReminder = (int)filter_var($prefsInput['deadline_reminder_enabled'], FILTER_VALIDATE_BOOLEAN);
+
+    $breakReminder = null;
+    if (isset($input['break_reminder_enabled'])) $breakReminder = (int)filter_var($input['break_reminder_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (isset($_POST['break_reminder_enabled'])) $breakReminder = (int)filter_var($_POST['break_reminder_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (is_array($prefsInput) && isset($prefsInput['break_reminder_enabled'])) $breakReminder = (int)filter_var($prefsInput['break_reminder_enabled'], FILTER_VALIDATE_BOOLEAN);
+
+    $strictMode = null;
+    if (isset($input['strict_mode_default'])) $strictMode = (int)filter_var($input['strict_mode_default'], FILTER_VALIDATE_BOOLEAN);
+    elseif (isset($input['strict_mode_enabled'])) $strictMode = (int)filter_var($input['strict_mode_enabled'], FILTER_VALIDATE_BOOLEAN);
+    elseif (isset($_POST['strict_mode_default'])) $strictMode = (int)filter_var($_POST['strict_mode_default'], FILTER_VALIDATE_BOOLEAN);
+    elseif (is_array($prefsInput) && isset($prefsInput['strict_mode_default'])) $strictMode = (int)filter_var($prefsInput['strict_mode_default'], FILTER_VALIDATE_BOOLEAN);
+
+    $breakDuration = null;
+    if (isset($input['break_duration'])) $breakDuration = (int)$input['break_duration'];
+    elseif (isset($input['short_break_duration'])) $breakDuration = (int)$input['short_break_duration'];
+    elseif (isset($_POST['break_duration'])) $breakDuration = (int)$_POST['break_duration'];
+    elseif (isset($_POST['short_break_duration'])) $breakDuration = (int)$_POST['short_break_duration'];
+    elseif (is_array($prefsInput) && isset($prefsInput['break_duration'])) $breakDuration = (int)$prefsInput['break_duration'];
+    elseif (is_array($prefsInput) && isset($prefsInput['short_break_duration'])) $breakDuration = (int)$prefsInput['short_break_duration'];
+
+    $reminderTime = null;
+    if (isset($input['reminder_time'])) $reminderTime = trim($input['reminder_time']);
+    elseif (isset($_POST['reminder_time'])) $reminderTime = trim($_POST['reminder_time']);
+    elseif (is_array($prefsInput) && isset($prefsInput['reminder_time'])) $reminderTime = trim($prefsInput['reminder_time']);
+
+    $existingPrefStmt = $conn->prepare("SELECT * FROM user_preferences WHERE user_id = :uid LIMIT 1");
+    $existingPrefStmt->execute([':uid' => $userId]);
+    $currPrefs = $existingPrefStmt->fetch();
+
+    $finalDailyGoal = ($dailyGoal !== null) ? max(1, min(720, $dailyGoal)) : ($currPrefs ? (int)$currPrefs['daily_focus_goal_minutes'] : 240);
+    $finalFocusDuration = ($focusDuration !== null) ? max(5, min(180, $focusDuration)) : ($currPrefs ? (int)$currPrefs['preferred_focus_duration'] : 45);
+    $finalReminders = ($reminders !== null) ? $reminders : ($currPrefs ? (int)$currPrefs['reminders_enabled'] : 1);
+    $finalDailyReminder = ($dailyReminder !== null) ? $dailyReminder : ($currPrefs && isset($currPrefs['daily_reminder_enabled']) ? (int)$currPrefs['daily_reminder_enabled'] : 1);
+    $finalDeadlineReminder = ($deadlineReminder !== null) ? $deadlineReminder : ($currPrefs && isset($currPrefs['deadline_reminder_enabled']) ? (int)$currPrefs['deadline_reminder_enabled'] : 1);
+    $finalBreakReminder = ($breakReminder !== null) ? $breakReminder : ($currPrefs && isset($currPrefs['break_reminder_enabled']) ? (int)$currPrefs['break_reminder_enabled'] : 1);
+    $finalStrictMode = ($strictMode !== null) ? $strictMode : ($currPrefs && isset($currPrefs['strict_mode_default']) ? (int)$currPrefs['strict_mode_default'] : 0);
+    $finalBreakDuration = ($breakDuration !== null) ? max(1, min(60, $breakDuration)) : ($currPrefs && isset($currPrefs['break_duration']) ? (int)$currPrefs['break_duration'] : 5);
+    $finalReminderTime = ($reminderTime !== null && strlen($reminderTime) >= 4) ? $reminderTime : ($currPrefs['reminder_time'] ?? '09:00 AM');
+
+    $upsertPrefSql = "
+        INSERT INTO user_preferences (
+            user_id, preferred_focus_duration, daily_focus_goal_minutes,
+            reminders_enabled, notifications_enabled, daily_reminder_enabled,
+            deadline_reminder_enabled, break_reminder_enabled,
+            strict_mode_default, break_duration, reminder_time
+        ) VALUES (
+            :uid, :dur, :goal, :rem, :notif, :daily_rem, :dead_rem, :brk_rem, :strict, :brk_dur, :rem_time
+        )
+        ON DUPLICATE KEY UPDATE
+            preferred_focus_duration  = VALUES(preferred_focus_duration),
+            daily_focus_goal_minutes  = VALUES(daily_focus_goal_minutes),
+            reminders_enabled         = VALUES(reminders_enabled),
+            notifications_enabled     = VALUES(notifications_enabled),
+            daily_reminder_enabled    = VALUES(daily_reminder_enabled),
+            deadline_reminder_enabled = VALUES(deadline_reminder_enabled),
+            break_reminder_enabled    = VALUES(break_reminder_enabled),
+            strict_mode_default       = VALUES(strict_mode_default),
+            break_duration            = VALUES(break_duration),
+            reminder_time             = VALUES(reminder_time),
+            updated_at                = CURRENT_TIMESTAMP
+    ";
+    $upsertPrefStmt = $conn->prepare($upsertPrefSql);
+    $upsertPrefStmt->execute([
+        ':uid'       => $userId,
+        ':dur'       => $finalFocusDuration,
+        ':goal'      => $finalDailyGoal,
+        ':rem'       => $finalReminders,
+        ':notif'     => $finalReminders,
+        ':daily_rem' => $finalDailyReminder,
+        ':dead_rem'  => $finalDeadlineReminder,
+        ':brk_rem'   => $finalBreakReminder,
+        ':strict'    => $finalStrictMode,
+        ':brk_dur'   => $finalBreakDuration,
+        ':rem_time'  => $finalReminderTime
+    ]);
+
     $fetchStmt = $conn->prepare("SELECT id, name, email, avatar, bio, created_at FROM users WHERE id = :id LIMIT 1");
     $fetchStmt->execute([':id' => $userId]);
     $updatedUser = $fetchStmt->fetch();
     $savedAvatar = $updatedUser['avatar'] ?? $avatar;
+
+    $preferencesData = [
+        "daily_focus_goal_minutes" => $finalDailyGoal,
+        "daily_focus_goal"         => $finalDailyGoal,
+        "preferred_focus_duration" => $finalFocusDuration,
+        "notifications_enabled"    => $finalReminders,
+        "daily_reminder_enabled"   => $finalDailyReminder,
+        "deadline_reminder_enabled"=> $finalDeadlineReminder,
+        "break_reminder_enabled"   => $finalBreakReminder,
+        "strict_mode_default"      => $finalStrictMode,
+        "short_break_duration"     => $finalBreakDuration,
+        "break_duration"           => $finalBreakDuration,
+        "long_break_duration"      => 15,
+        "reminder_time"            => $finalReminderTime
+    ];
 
     http_response_code(200);
     echo json_encode([
@@ -169,8 +267,16 @@ try {
             "avatar" => $savedAvatar,
             "avatar_url" => $savedAvatar,
             "bio" => $updatedUser['bio'] ?? $bio,
+            "daily_focus_goal" => $finalDailyGoal,
+            "daily_focus_goal_minutes" => $finalDailyGoal,
+            "preferences" => $preferencesData,
             "created_at" => $updatedUser['created_at'] ?? date("Y-m-d H:i:s")
-        ]
+        ],
+        "preferences" => $preferencesData,
+        "daily_focus_goal" => $finalDailyGoal,
+        "daily_focus_goal_minutes" => $finalDailyGoal,
+        "avatar" => $savedAvatar,
+        "avatar_url" => $savedAvatar
     ]);
 
 } catch (PDOException $e) {

@@ -26,8 +26,11 @@ if (empty($name)) {
 }
 
 $avatarPath = null;
+$postedAvatar = trim($_POST['avatar'] ?? $_POST['avatar_url'] ?? $_POST['avatar_path'] ?? '');
+if (!empty($postedAvatar)) {
+    $avatarPath = $postedAvatar;
+}
 
-// 2. Handle Image File Upload (from Camera or Gallery)
 if (isset($_FILES['profile_image']) && $_FILES['profile_image']['error'] === UPLOAD_ERR_OK) {
     $fileTmpPath   = $_FILES['profile_image']['tmp_name'];
     $fileName      = $_FILES['profile_image']['name'];

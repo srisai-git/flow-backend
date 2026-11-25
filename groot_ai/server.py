@@ -101,8 +101,9 @@ except Exception:
 
 SYSTEM_PERSONA = (
     "You are Groot, the ultimate AI productivity collaborator in the FocusFlow app.\n"
-    "You are sharp, encouraging, concise, and fluent in modern natural conversational English and Gen-Z slang (e.g. lock in, cooked, no cap, bet, say less, fr, W, delulu, era, vibes, lowkey, highkey, slay).\n"
-    "You NEVER use canned corporate refusals like \"I'm sorry, I can't assist with that\". You happily chat casually, answer questions directly and concisely, give study and coding guidance, or acknowledge greetings like \"bye byee\" and \"hello\".\n"
+    "You are sharp, encouraging, concise, and fluent in modern natural conversational English.\n"
+    "You NEVER give robotic disclaimers, capability refusals, or state what you cannot do (never say 'As an AI' or 'I cannot sing or eat' or 'I am an AI'). You happily chat naturally, answer questions directly and concisely, give study and coding guidance, and warmly acknowledge greetings like 'hi', 'hello', 'hey', 'yo', and 'good morning'.\n"
+    "When greeted with 'hi', 'hello', 'hey', 'yo', or 'good morning', respond with a warm, friendly, natural reply like 'Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task.' with action type NONE.\n"
     "You answer user questions directly, accurately, and concisely using the live FocusFlow user context provided in the request (such as pending and completed tasks, active habits and streaks, timer status, distraction logs, and daily productivity stats).\n"
     "Strict Grounding and Honesty: Never hallucinate user stats, metrics, habits, tasks, or capabilities. If the user asks about data not present in their context or something you genuinely do not know, clearly and honestly admit that you do not have that data or do not know, instead of making up numbers or answers.\n"
     "You strictly output zero emojis.\n\n"
@@ -251,8 +252,15 @@ def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any],
     if re.search(r'\b(?:bye\s*byee?|bye\b|goodbye|cya|catch\s+you\s+later|see\s+ya)\b', q_lower):
         return normalize_action("NONE", {}), "Bye byee! Great focus session today. Keep crushing it and lock in again soon!"
 
-    if re.search(r'\b(?:hello|hi\b|hey\b|what\'?s\s+up|wassup|yo\b)\b', q_lower) and len(q_lower.split()) <= 4:
-        return normalize_action("NONE", {}), "Hey! Ready to lock in and get into flow state? What are we working on today?"
+    if (
+        re.match(r'^(?:hi|hello|hey|yo|what\'?s\s+up|wassup|sup|good\s+morning|good\s+afternoon|good\s+evening|morning)(?:\s+(?:there|groot|focusflow|everyone|all|friend|buddy))?[\s!.]*$', q_lower)
+        or (
+            re.search(r'\b(?:hi|hello|hey|yo|good\s+morning|good\s+afternoon|good\s+evening)\b', q_lower)
+            and len(q_lower.split()) <= 5
+            and not any(cmd in q_lower for cmd in ["timer", "task", "habit", "block", "streak", "focus", "analysis", "distract", "profile", "start", "set", "create", "delete", "remove", "add", "complete", "edit"])
+        )
+    ):
+        return normalize_action("NONE", {}), "Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task."
 
     if re.search(r'\b(?:fr|for\s+real|no\s+cap)\b', q_lower) and len(q_lower.split()) <= 4:
         return normalize_action("NONE", {}), "For real, no cap. Let's keep the streak compounding."
@@ -648,7 +656,7 @@ def generate_response(prompt_text: str, original_query: str, max_tokens: int = 2
         except Exception as e:
             print(f"[GrootAI] Local model generation error: {e}")
 
-    return "I am Groot, your focus and productivity collaborator. How can we level up your flow state today?", normalize_action("NONE", {})
+    return "Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task.", normalize_action("NONE", {})
 
 @app.get("/")
 @app.get("/health")
@@ -658,7 +666,7 @@ def health():
 @app.get("/chat")
 @app.get("/groot/chat")
 def chat_endpoint_get():
-    return make_response_dict("I am Groot, your focus and productivity companion.", normalize_action("NONE", {}))
+    return make_response_dict("Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task.", normalize_action("NONE", {}))
 
 @app.post("/chat")
 @app.post("/groot/chat")

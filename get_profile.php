@@ -143,6 +143,21 @@ try {
         }
     }
 
+    $preferencesData = [
+        "daily_focus_goal_minutes" => $dailyFocusGoalMinutes,
+        "daily_focus_goal"         => $dailyFocusGoalMinutes,
+        "preferred_focus_duration" => $preferredDuration,
+        "notifications_enabled"    => $remindersEnabled ? 1 : 0,
+        "daily_reminder_enabled"   => $dailyReminder ? 1 : 0,
+        "deadline_reminder_enabled"=> $deadlineReminder ? 1 : 0,
+        "break_reminder_enabled"   => $breakReminder ? 1 : 0,
+        "strict_mode_default"      => $strictMode ? 1 : 0,
+        "short_break_duration"     => $breakDuration,
+        "break_duration"           => $breakDuration,
+        "long_break_duration"      => 15,
+        "reminder_time"            => $reminderTime
+    ];
+
     http_response_code(200);
     echo json_encode([
         "status" => true,
@@ -159,16 +174,26 @@ try {
             "total_focus_minutes" => $totalMinutes,
             "completed_tasks_count" => $completedTasksCount,
             "current_streak" => $currentStreak,
+            "daily_focus_goal" => $dailyFocusGoalMinutes,
             "daily_focus_goal_minutes" => $dailyFocusGoalMinutes,
             "preferred_focus_duration" => $preferredDuration,
             "reminders_enabled" => $remindersEnabled,
-            "daily_reminder_enabled" => $dailyReminder,
-            "deadline_reminder_enabled" => $deadlineReminder,
-            "break_reminder_enabled" => $breakReminder,
-            "strict_mode_default" => $strictMode,
+            "notifications_enabled" => $remindersEnabled ? 1 : 0,
+            "daily_reminder_enabled" => $dailyReminder ? 1 : 0,
+            "deadline_reminder_enabled" => $deadlineReminder ? 1 : 0,
+            "break_reminder_enabled" => $breakReminder ? 1 : 0,
+            "strict_mode_default" => $strictMode ? 1 : 0,
+            "short_break_duration" => $breakDuration,
             "break_duration" => $breakDuration,
-            "reminder_time" => $reminderTime
-        ]
+            "long_break_duration" => 15,
+            "reminder_time" => $reminderTime,
+            "preferences" => $preferencesData
+        ],
+        "preferences" => $preferencesData,
+        "daily_focus_goal" => $dailyFocusGoalMinutes,
+        "daily_focus_goal_minutes" => $dailyFocusGoalMinutes,
+        "avatar" => $resolvedAvatar,
+        "avatar_url" => $resolvedAvatar
     ]);
 
 } catch (PDOException $e) {

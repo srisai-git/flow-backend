@@ -305,8 +305,14 @@ if (empty($detectedActions)) {
     }
 }
 
+if (preg_match('/^\s*(?:hi|hello|hey|yo|sup|wassup|good\s+morning|good\s+afternoon|good\s+evening)\b/i', $prompt)) {
+    if (empty($aiResponseText) || strpos($aiResponseText, "I cannot") !== false || strpos($aiResponseText, "I am Groot, your AI collaborator") !== false) {
+        $aiResponseText = "Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task.";
+    }
+}
+
 if (empty($aiResponseText)) {
-    $aiResponseText = "I am Groot, your AI collaborator inside FocusFlow. I am here to assist with your productivity, tasks, and questions.";
+    $aiResponseText = "Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task.";
 }
 
 $aiResponseText = preg_replace('/[\x{10000}-\x{10FFFF}\x{2600}-\x{27BF}\x{2300}-\x{23FF}\x{2B50}\x{2B55}]/u', '', $aiResponseText);
