@@ -103,17 +103,14 @@ SYSTEM_PERSONA = (
     "You are Groot, the ultimate AI productivity collaborator in the FocusFlow app.\n"
     "You are sharp, encouraging, concise, and fluent in modern natural conversational English.\n"
     "You NEVER give robotic disclaimers, capability refusals, or state what you cannot do (never say 'As an AI' or 'I cannot sing or eat' or 'I am an AI'). You happily chat naturally, answer questions directly and concisely, give study and coding guidance, and warmly acknowledge greetings like 'hi', 'hello', 'hey', 'yo', and 'good morning'.\n"
-    "When greeted with 'hi', 'hello', 'hey', 'yo', or 'good morning', respond with a warm, friendly, natural reply like 'Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task.' with action type NONE.\n"
-    "You have complete knowledge of FocusFlow features and rules:\n"
-    "- Focus Timer: Custom duration of any minutes (1-720m) with FOCUS, SHORT_BREAK, and LONG_BREAK modes.\n"
-    "- Strict Focus Mode: AccessibilityService blocker with zero overlay permissions, immediately returning home on blocked app launch with 150ms and 350ms follow-up enforcement.\n"
-    "- Tasks: Supports high, medium, and low priority, exact scheduled deadline dates and times, and real-time completion state.\n"
-    "- Habits: Pure daily frequency without day-of-week selectors, dotted momentum graph, and streak tracking based only on real productivity actions (zero streak increment on login alone).\n"
-    "- Distraction Analysis: Single-foreground UsageStats tracking with minimal horizontal bars, filtering non-interactive/keyguard states and requiring 1+ min usage.\n"
-    "- Focus Time Analysis: Today focus stats + Past 7 Days Focus bar chart with threshold goal line and reactive weekly focus goal.\n"
-    "- Profile & Settings: Avatar selection, daily focus goal synced to MySQL backend, mini streak calendar, and instant reactive DataStore updates.\n"
-    "- Full Export: Complete productivity history and chat transcript export to CSV/JSON.\n"
-    "You answer user questions directly, accurately, and concisely using the live FocusFlow user context provided in the request (such as pending and completed tasks, active habits and streaks, timer status, distraction logs, and daily productivity stats).\n"
+    "When greeted with 'hi', 'hello', 'hey', 'yo', or 'good morning', respond with a warm, friendly, natural reply like 'Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task.' with action type NONE.\n\n"
+    "COMPREHENSIVE FOCUSFLOW PRODUCT & ARCHITECTURE REFERENCE:\n"
+    "1. Core Purpose & Stack: FocusFlow (package: com.simats.focusflow) is an offline-first Android productivity app built with Kotlin, Jetpack Compose, Room, DataStore, and a Python FastAPI + Google Gemini backend on Render.\n"
+    "2. Focus Timer & Strict Focus Mode: Supports any custom duration (e.g., 25m, 90m, 180m, or any duration 1-720m) via a ForegroundService with live notification; Strict Focus Mode uses an AccessibilityService (GLOBAL_ACTION_HOME) to block selected distracting apps without intrusive SYSTEM_ALERT_WINDOW overlays.\n"
+    "3. Tasks & Habits: Tasks show exact deadline times (no countdown clutter); Habits use frictionless creation (no day-of-week selector), inline streak counts, a unified Groot AI Habit Insights card with consistency score, and a dotted-line momentum trend graph.\n"
+    "4. Analytics & Streaks: Streaks increment strictly on real completions (focus session, task, or habit - never on login alone) and open a mini Streak Calendar in Profile; Focus Time Analysis shows Today's time-of-day breakdown plus a rolling Past 7 Days Focus bar chart against the user's reactive weekly goal; Distraction Analysis tracks foreground usage via a single-foreground UsageStatsManager state machine displayed with clean horizontal progress bars; Export Productivity Data generates a full-history report across all time.\n"
+    "5. Agentic Capabilities: Groot AI executes START_TIMER (exact minutes), CREATE_TASK / EDIT_TASK / COMPLETE_TASK, CREATE_HABIT / EDIT_HABIT / COMPLETE_HABIT, NAVIGATE (any screen), UPDATE_PROFILE (name/bio), EXPORT_DATA, and honest, context-grounded Q&A (admitting when data isn't available rather than guessing).\n\n"
+    "You answer user and examiner questions directly, accurately, and concisely using the comprehensive FocusFlow product & architecture reference and the live FocusFlow user context provided in the request (such as pending and completed tasks, active habits and streaks, timer status, distraction logs, and daily productivity stats).\n"
     "Strict Grounding and Honesty: Never hallucinate user stats, metrics, habits, tasks, or capabilities. If the user asks about data not present in their context or something you genuinely do not know, clearly and honestly admit that you do not have that data or do not know, instead of making up numbers or answers.\n"
     "You strictly output zero emojis.\n\n"
     "You always format your output as valid JSON with this exact schema:\n"
@@ -274,6 +271,33 @@ def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any],
     ):
         return normalize_action("NONE", {}), "Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task."
 
+    if any(k in q_lower for k in ["core purpose", "tech stack", "what is focusflow", "what stack", "built with", "architecture"]):
+        return normalize_action("NONE", {}), "FocusFlow (com.simats.focusflow) is an offline-first Android productivity app built with Kotlin, Jetpack Compose, Room, DataStore, and a Python FastAPI + Google Gemini backend on Render."
+
+    if any(k in q_lower for k in ["strict focus", "accessibility service", "how strict mode", "strict mode work", "block app"]) and not any(cmd in q_lower for cmd in ["block ", "unblock "]):
+        return normalize_action("NONE", {}), "Strict Focus Mode uses an AccessibilityService (GLOBAL_ACTION_HOME) to block selected distracting apps without intrusive SYSTEM_ALERT_WINDOW overlays, running 150ms and 350ms follow-up enforcement checks."
+
+    if any(k in q_lower for k in ["how timer", "timer work", "explain the focus timer", "about the focus timer", "how focus timer", "timer architecture"]) or (("focus timer" in q_lower or "foreground service" in q_lower) and any(w in q_lower for w in ["how", "what", "explain", "tell", "describe", "work"])):
+        return normalize_action("NONE", {}), "Focus Timer supports any custom duration (e.g., 25m, 90m, 180m, or any duration 1-720m) across FOCUS, SHORT_BREAK, and LONG_BREAK modes via a ForegroundService with live notification."
+
+    if any(k in q_lower for k in ["distraction analysis", "how distraction", "usage stat", "screen time work", "track distraction", "distraction tracking"]):
+        return normalize_action("NONE", {}), "Distraction Analysis tracks foreground usage via a single-foreground UsageStatsManager state machine displayed with clean horizontal progress bars for apps used for at least one minute."
+
+    if any(k in q_lower for k in ["past 7", "focus time analysis", "past seven", "weekly focus goal", "7 days focus"]) and not any(cmd in q_lower for cmd in ["go to", "open", "show", "navigate"]):
+        return normalize_action("NONE", {}), "Focus Time Analysis shows Today's time-of-day breakdown plus a rolling Past 7 Days Focus bar chart against the user's reactive weekly goal with a left-aligned threshold goal line."
+
+    if any(k in q_lower for k in ["momentum", "habit graph", "habit tracking", "how habit", "habits work", "how do habits", "how are habits", "how tasks and habits"]):
+        return normalize_action("NONE", {}), "Tasks show exact deadline times with no countdown clutter. Habits use frictionless creation (no day-of-week selector), inline streak counts, a unified Groot AI Habit Insights card with consistency score, and a dotted-line momentum trend graph."
+
+    if any(k in q_lower for k in ["streak qualification", "how streak", "streak rule", "streak calculate", "streak calculated", "streak increment", "streaks calculated"]):
+        return normalize_action("NONE", {}), "Streaks increment strictly on real completions (focus session, task, or habit - never on login alone) and open a mini Streak Calendar in Profile."
+
+    if any(k in q_lower for k in ["export data", "export productivity", "how does export", "how export work"]) and any(w in q_lower for w in ["how", "what", "explain", "tell", "describe", "work"]):
+        return normalize_action("NONE", {}), "Export Productivity Data generates a comprehensive full-history report in CSV and JSON formats covering all past focus sessions, tasks, habits, and distractions across all time."
+
+    if any(k in q_lower for k in ["agentic", "what actions can you do", "what can groot do", "what can you do", "capabilities", "agent capabilities"]):
+        return normalize_action("NONE", {}), "Groot AI executes START_TIMER (exact minutes), CREATE_TASK / EDIT_TASK / COMPLETE_TASK, CREATE_HABIT / EDIT_HABIT / COMPLETE_HABIT, NAVIGATE (any screen), UPDATE_PROFILE (name/bio), EXPORT_DATA, and honest, context-grounded Q&A."
+
     if re.search(r'\b(?:fr|for\s+real|no\s+cap)\b', q_lower) and len(q_lower.split()) <= 4:
         return normalize_action("NONE", {}), "For real, no cap. Let's keep the streak compounding."
 
@@ -353,7 +377,7 @@ def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any],
         act = normalize_action("NAVIGATE", {"screen": screen})
         return act, f"Navigating to {screen}."
 
-    if re.search(r'\b(?:export|backup|download)\s+(?:all\s+)?(?:productivity\s+)?(?:data|history|records)\b', q_lower):
+    if re.search(r'\b(?:export|backup|download)\s+(?:all\s+|my\s+|the\s+)?(?:productivity\s+)?(?:data|history|records)\b', q_lower):
         act = normalize_action("EXPORT_DATA", {"format": "all"})
         return act, "Exporting your complete productivity data."
 
@@ -453,18 +477,6 @@ def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any],
         act = normalize_action("UPDATE_PROFILE", {"name": None, "bio": new_bio})
         return act, "Updated your profile bio."
 
-    if any(k in q_lower for k in ["strict focus", "accessibility service", "how strict mode", "strict mode work", "block app"]):
-        return normalize_action("NONE", {}), "Strict Focus Mode runs directly via FocusBlockerAccessibilityService with zero overlay permissions required. When active, opening any blocked app immediately redirects you back to the home screen with 150ms and 350ms follow-up checks."
-
-    if any(k in q_lower for k in ["distraction analysis", "how distraction", "usage stat", "screen time work", "track distraction"]):
-        return normalize_action("NONE", {}), "Distraction Analysis uses UsageStatsManager with a strict single-foreground tracker. It ignores background events and keyguard states, displaying minimal horizontal bars for apps used for at least one minute."
-
-    if any(k in q_lower for k in ["past 7", "focus time analysis", "past seven", "weekly focus goal", "7 days focus"]):
-        return normalize_action("NONE", {}), "Focus Time Analysis provides an exact today breakdown alongside the Past 7 Days Focus bar chart with a threshold goal line and a reactive weekly goal target."
-
-    if any(k in q_lower for k in ["momentum", "habit graph", "habit tracking", "how habit"]):
-        return normalize_action("NONE", {}), "Habits operate on a pure daily cycle without day-of-week selectors, featuring a dotted momentum graph and real-time streak validation requiring real actions."
-
     if any(q_word in q_lower for q_word in ["streak", "focus time", "how much focus", "how many tasks", "what tasks", "my habits", "what habits", "distraction", "screen time"]):
         if "streak" in q_lower:
             m_st = re.search(r'Streak:\s*(\d+\s*days?)', ctx_body)
@@ -552,12 +564,12 @@ def make_response_dict(reply_text: str, action_obj: Dict[str, Any]) -> Dict[str,
 
 class Message(BaseModel):
     role: str = Field(..., max_length=50)
-    content: str = Field(..., max_length=4000)
+    content: str = Field(..., max_length=32000)
 
 class ChatCompletionRequest(BaseModel):
     model: Optional[str] = Field("groot", max_length=100)
     messages: Optional[List[Message]] = None
-    prompt: Optional[str] = Field(None, max_length=4000)
+    prompt: Optional[str] = Field(None, max_length=32000)
     temperature: Optional[float] = Field(0.2, ge=0.0, le=2.0)
     max_tokens: Optional[int] = Field(220, ge=1, le=2048)
     top_p: Optional[float] = Field(0.85, ge=0.0, le=1.0)
@@ -573,10 +585,10 @@ def format_app_context(ctx: Optional[Union[Dict[str, Any], str]], knowledge: Opt
     return ("\n".join(parts) + "\n") if parts else ""
 
 class SimpleChatRequest(BaseModel):
-    message: Optional[str] = Field(None, max_length=4000)
-    prompt: Optional[str] = Field(None, max_length=4000)
-    query: Optional[str] = Field(None, max_length=4000)
-    text: Optional[str] = Field(None, max_length=4000)
+    message: Optional[str] = Field(None, max_length=32000)
+    prompt: Optional[str] = Field(None, max_length=32000)
+    query: Optional[str] = Field(None, max_length=32000)
+    text: Optional[str] = Field(None, max_length=32000)
     app_context: Optional[Union[Dict[str, Any], str]] = None
     app_knowledge: Optional[Union[Dict[str, Any], str]] = None
 
@@ -584,10 +596,10 @@ class SimpleChatRequest(BaseModel):
         extra = "allow"
 
 class ChatRequest(BaseModel):
-    message: Optional[str] = Field(None, max_length=4000)
-    prompt: Optional[str] = Field(None, max_length=4000)
-    query: Optional[str] = Field(None, max_length=4000)
-    text: Optional[str] = Field(None, max_length=4000)
+    message: Optional[str] = Field(None, max_length=32000)
+    prompt: Optional[str] = Field(None, max_length=32000)
+    query: Optional[str] = Field(None, max_length=32000)
+    text: Optional[str] = Field(None, max_length=32000)
     history: Optional[List[Any]] = None
     user_id: Optional[int] = 1
     app_context: Optional[Union[Dict[str, Any], str]] = None
