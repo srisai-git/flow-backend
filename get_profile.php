@@ -109,9 +109,8 @@ try {
         }
     }
 
-    // 5. User preferences (daily focus target and reminders)
     $prefStmt = $conn->prepare("
-        SELECT daily_focus_goal_minutes, preferred_focus_duration, reminders_enabled
+        SELECT *
         FROM user_preferences
         WHERE user_id = :uid
         LIMIT 1
@@ -122,6 +121,12 @@ try {
     $dailyFocusGoalMinutes = $prefs ? (int)$prefs['daily_focus_goal_minutes'] : 240;
     $preferredDuration = $prefs ? (int)$prefs['preferred_focus_duration'] : 45;
     $remindersEnabled = $prefs ? (bool)$prefs['reminders_enabled'] : true;
+    $dailyReminder = $prefs && isset($prefs['daily_reminder_enabled']) ? (bool)$prefs['daily_reminder_enabled'] : true;
+    $deadlineReminder = $prefs && isset($prefs['deadline_reminder_enabled']) ? (bool)$prefs['deadline_reminder_enabled'] : true;
+    $breakReminder = $prefs && isset($prefs['break_reminder_enabled']) ? (bool)$prefs['break_reminder_enabled'] : true;
+    $strictMode = $prefs && isset($prefs['strict_mode_default']) ? (bool)$prefs['strict_mode_default'] : false;
+    $breakDuration = $prefs && isset($prefs['break_duration']) ? (int)$prefs['break_duration'] : 5;
+    $reminderTime = $prefs['reminder_time'] ?? '09:00 AM';
 
     // Format member_since readable string
     $createdAtTimestamp = strtotime($user['created_at'] ?? 'now');
@@ -156,7 +161,13 @@ try {
             "current_streak" => $currentStreak,
             "daily_focus_goal_minutes" => $dailyFocusGoalMinutes,
             "preferred_focus_duration" => $preferredDuration,
-            "reminders_enabled" => $remindersEnabled
+            "reminders_enabled" => $remindersEnabled,
+            "daily_reminder_enabled" => $dailyReminder,
+            "deadline_reminder_enabled" => $deadlineReminder,
+            "break_reminder_enabled" => $breakReminder,
+            "strict_mode_default" => $strictMode,
+            "break_duration" => $breakDuration,
+            "reminder_time" => $reminderTime
         ]
     ]);
 

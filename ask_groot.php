@@ -33,22 +33,7 @@ if (empty($prompt)) {
 
 $lowerPrompt = strtolower($prompt);
 
-if (preg_match('/\b(sing|singing|song|eat|eating|food|sleep|sleeping|sleepy|run|running|dance|dancing|walk|walking|cook|cooking|drink|drinking)\b/i', $prompt)) {
-    $decline = "As an AI companion inside FocusFlow, I cannot sing or eat, but I can help you focus, start a timer, or track your habits.";
-    echo json_encode([
-        "status" => "success",
-        "success" => true,
-        "reply" => $decline,
-        "insight" => $decline,
-        "response" => $decline,
-        "message" => $decline,
-        "actions" => [],
-        "action" => null
-    ]);
-    exit();
-}
-
-if (preg_match('/\b(rajini|rajinikanth|actor|actress|movie|cinema|film|celebrity|hero|director|cricket|football|fifa|ipl|messi|ronaldo|politician|politics|president|minister|song|bollywood|hollywood|kollywood|tollywood|gossip)\b/i', $prompt)) {
+if (preg_match('/\b(rajini|rajinikanth|actor|actress|movie|cinema|film|celebrity|hero|director|cricket|football|fifa|ipl|messi|ronaldo|politician|politics|president|minister|bollywood|hollywood|kollywood|tollywood|gossip)\b/i', $prompt)) {
     $decline = "I am dedicated to your productivity and learning inside FocusFlow. I can help you plan study sessions, write code, solve problems, or track your habits. What would you like to accomplish today?";
     echo json_encode([
         "status" => "success",

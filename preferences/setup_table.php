@@ -35,7 +35,13 @@ function ensurePreferencesTableExists(PDO $conn): void {
         'preferred_focus_duration' => "ALTER TABLE `user_preferences` ADD COLUMN `preferred_focus_duration` INT(11) NOT NULL DEFAULT 45 AFTER `primary_goal`",
         'daily_focus_goal_minutes' => "ALTER TABLE `user_preferences` ADD COLUMN `daily_focus_goal_minutes` INT(11) NOT NULL DEFAULT 210 AFTER `preferred_focus_duration`",
         'reminders_enabled'        => "ALTER TABLE `user_preferences` ADD COLUMN `reminders_enabled` TINYINT(1) NOT NULL DEFAULT 1 AFTER `daily_focus_goal_minutes`",
-        'reminder_time'            => "ALTER TABLE `user_preferences` ADD COLUMN `reminder_time` VARCHAR(10) NOT NULL DEFAULT '09:00 AM' AFTER `reminders_enabled`",
+        'notifications_enabled'    => "ALTER TABLE `user_preferences` ADD COLUMN `notifications_enabled` TINYINT(1) NOT NULL DEFAULT 1 AFTER `reminders_enabled`",
+        'daily_reminder_enabled'   => "ALTER TABLE `user_preferences` ADD COLUMN `daily_reminder_enabled` TINYINT(1) NOT NULL DEFAULT 1 AFTER `notifications_enabled`",
+        'deadline_reminder_enabled'=> "ALTER TABLE `user_preferences` ADD COLUMN `deadline_reminder_enabled` TINYINT(1) NOT NULL DEFAULT 1 AFTER `daily_reminder_enabled`",
+        'break_reminder_enabled'   => "ALTER TABLE `user_preferences` ADD COLUMN `break_reminder_enabled` TINYINT(1) NOT NULL DEFAULT 1 AFTER `deadline_reminder_enabled`",
+        'strict_mode_default'      => "ALTER TABLE `user_preferences` ADD COLUMN `strict_mode_default` TINYINT(1) NOT NULL DEFAULT 0 AFTER `break_reminder_enabled`",
+        'break_duration'           => "ALTER TABLE `user_preferences` ADD COLUMN `break_duration` INT(11) NOT NULL DEFAULT 5 AFTER `strict_mode_default`",
+        'reminder_time'            => "ALTER TABLE `user_preferences` ADD COLUMN `reminder_time` VARCHAR(10) NOT NULL DEFAULT '09:00 AM' AFTER `break_duration`",
         'updated_at'               => "ALTER TABLE `user_preferences` ADD COLUMN `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER `reminder_time`"
     ];
 
