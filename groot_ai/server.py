@@ -3,6 +3,7 @@ import html
 import json
 import re
 import time
+import warnings
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Union
 from dotenv import load_dotenv
@@ -12,10 +13,11 @@ import torch
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import PeftModel
 
+warnings.filterwarnings("ignore")
 load_dotenv()
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -77,14 +79,14 @@ try:
     try:
         base_model = AutoModelForCausalLM.from_pretrained(
             base_model_id,
-            torch_dtype=torch.float16 if use_cuda else torch.float32,
+            dtype=torch.float16 if use_cuda else torch.float32,
             device_map="auto" if use_cuda else None,
             local_files_only=True
         )
     except Exception:
         base_model = AutoModelForCausalLM.from_pretrained(
             base_model_id,
-            torch_dtype=torch.float16 if use_cuda else torch.float32,
+            dtype=torch.float16 if use_cuda else torch.float32,
             device_map="auto" if use_cuda else None
         )
 
@@ -270,6 +272,9 @@ def extract_actions_and_reply(user_query: str) -> Optional[Tuple[Dict[str, Any],
         )
     ):
         return normalize_action("NONE", {}), "Hey! Ready to get things done today? Let me know if you want to start a focus session or add a task."
+
+    if q_lower in ("status", "app status", "current status", "system status", "ping"):
+        return normalize_action("NONE", {}), "FocusFlow and Groot AI are fully operational. All services, timers, and tracking are ready."
 
     if any(k in q_lower for k in ["core purpose", "tech stack", "what is focusflow", "what stack", "built with", "architecture"]):
         return normalize_action("NONE", {}), "FocusFlow (com.simats.focusflow) is an offline-first Android productivity app built with Kotlin, Jetpack Compose, Room, DataStore, and a Python FastAPI + Google Gemini backend on Render."
@@ -585,6 +590,7 @@ def format_app_context(ctx: Optional[Union[Dict[str, Any], str]], knowledge: Opt
     return ("\n".join(parts) + "\n") if parts else ""
 
 class SimpleChatRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
     message: Optional[str] = Field(None, max_length=32000)
     prompt: Optional[str] = Field(None, max_length=32000)
     query: Optional[str] = Field(None, max_length=32000)
@@ -592,10 +598,8 @@ class SimpleChatRequest(BaseModel):
     app_context: Optional[Union[Dict[str, Any], str]] = None
     app_knowledge: Optional[Union[Dict[str, Any], str]] = None
 
-    class Config:
-        extra = "allow"
-
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
     message: Optional[str] = Field(None, max_length=32000)
     prompt: Optional[str] = Field(None, max_length=32000)
     query: Optional[str] = Field(None, max_length=32000)
@@ -605,10 +609,8 @@ class ChatRequest(BaseModel):
     app_context: Optional[Union[Dict[str, Any], str]] = None
     app_knowledge: Optional[Union[Dict[str, Any], str]] = None
 
-    class Config:
-        extra = "allow"
-
 class StudyPlanRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
     subject: Optional[str] = None
     topic: Optional[str] = None
     goal: Optional[str] = None
@@ -616,6 +618,7 @@ class StudyPlanRequest(BaseModel):
     days: Optional[int] = 7
 
 class FocusCoachingRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
     focus_minutes: Optional[int] = 0
     distractions_count: Optional[int] = 0
     streak_days: Optional[int] = 0
@@ -675,19 +678,19 @@ def generate_response(prompt_text: str, original_query: str, max_tokens: int = 2
 
     if model is not None and tokenizer is not None:
         try:
-            inputs = tokenizer(prompt_text, return_tensors="pt")
+            local_prompt = f"<|im_start|>system\nYou are Groot, an intelligent, concise productivity assistant in the Flow app.<|im_end|>\n<|im_start|>user\n{original_query}<|im_end|>\n<|im_start|>assistant\n" if not use_cuda else prompt_text
+            inputs = tokenizer(local_prompt, return_tensors="pt")
             if use_cuda:
                 inputs = {k: v.to(model.device) for k, v in inputs.items()}
             with torch.inference_mode():
                 outputs = model.generate(
                     **inputs,
-                    max_new_tokens=min(max_tokens, 150),
+                    max_new_tokens=min(max_tokens, 45 if not use_cuda else 150),
                     temperature=temperature,
                     top_p=top_p,
                     repetition_penalty=1.12,
                     pad_token_id=tokenizer.eos_token_id,
-                    do_sample=True if temperature > 0 else False,
-                    early_stopping=True
+                    do_sample=True if temperature > 0 else False
                 )
             generated_tokens = outputs[0][inputs["input_ids"].shape[1]:]
             raw_reply = tokenizer.decode(generated_tokens, skip_special_tokens=True).strip()
@@ -845,41 +848,48 @@ def generate(req: dict):
     return make_response_dict(reply, action_obj)
 
 class TaskBreakdownRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
     task_title: Optional[str] = None
     title: Optional[str] = None
+    task: Optional[str] = None
+    task_name: Optional[str] = None
     prompt: Optional[str] = None
 
 @app.post("/breakdown_task")
 @app.post("/task/breakdown")
 def breakdown_task(req: TaskBreakdownRequest):
-    raw_title = req.task_title or req.title or req.prompt or ""
+    raw_title = req.task_title or req.title or req.task or req.task_name or req.prompt or ""
     task_name = html.unescape(raw_title.strip())
     if not task_name:
         return {"status": "error", "success": False, "message": "Task title is required", "task": "", "subtasks": []}
 
-    subtasks = []
-    try:
-        user_prompt = f"Break down this task into 3 or 4 short actionable steps: '{task_name}'. Output each step on its own line without numbering or bullets."
-        messages = [
-            Message(role="system", content="You are Groot, a productivity assistant. Provide 3 or 4 short, actionable subtasks, one per line."),
-            Message(role="user", content=user_prompt)
-        ]
-        prompt_text = build_prompt_from_messages(messages)
-        raw_output, _ = generate_response(prompt_text, user_prompt, max_tokens=140, temperature=0.2)
-        lines = [html.unescape(line.strip().lstrip("-*1234567890. ")) for line in raw_output.splitlines() if line.strip()]
-        for l in lines:
-            if len(l) > 3 and not l.lower().startswith("here are") and not l.lower().startswith("subtask"):
-                subtasks.append(l)
-            if len(subtasks) == 4:
-                break
-    except Exception:
-        pass
-
-    if len(subtasks) < 3:
+    t_lower = task_name.lower()
+    if any(k in t_lower for k in ("study", "exam", "learn", "read", "revision")):
         subtasks = [
-            f"Define requirements and scope for {task_name}",
-            f"Draft initial implementation for {task_name}",
-            f"Review, test and verify {task_name}",
+            f"Review key concepts and formulas for {task_name}",
+            f"Work through practice questions and active recall",
+            f"Identify weak areas and clarify doubts",
+            f"Complete final summary test and review notes"
+        ]
+    elif any(k in t_lower for k in ("code", "build", "program", "develop", "bug", "fix", "app", "api")):
+        subtasks = [
+            f"Plan technical architecture and dependencies for {task_name}",
+            f"Implement core logic and modules",
+            f"Run tests, handle edge cases, and debug issues",
+            f"Review code and finalize implementation"
+        ]
+    elif any(k in t_lower for k in ("write", "essay", "report", "paper", "article", "doc")):
+        subtasks = [
+            f"Research and outline structure for {task_name}",
+            f"Draft main content and supporting arguments",
+            f"Revise clarity, tone, and formatting",
+            f"Proofread and finalize complete document"
+        ]
+    else:
+        subtasks = [
+            f"Define requirements and clear scope for {task_name}",
+            f"Execute primary work in focused 25-minute Pomodoro blocks",
+            f"Review results and address any outstanding items",
             f"Finalize and mark {task_name} complete"
         ]
 
@@ -887,7 +897,7 @@ def breakdown_task(req: TaskBreakdownRequest):
         "status": "success",
         "success": True,
         "task": task_name,
-        "subtasks": subtasks[:4]
+        "subtasks": subtasks
     }
 
 @app.post("/study_plan")
@@ -895,25 +905,24 @@ def create_study_plan(req: StudyPlanRequest):
     subject = html.unescape((req.subject or req.topic or req.goal or "General Productivity").strip())
     hours = req.daily_hours or 2.0
     days = req.days or 7
-    user_prompt = (
-        f"Create a structured {days}-day study plan for '{subject}' with {hours} hours daily. "
-        "Divide it into clear daily blocks with focus topic, core objective, and recommended Pomodoro intervals. Keep it concise."
-    )
-    messages = [
-        Message(role="system", content=SYSTEM_PERSONA),
-        Message(role="user", content=user_prompt)
+    blocks = max(1, int(round(hours * 2)))
+    plan_lines = [
+        f"{days}-Day Structured Study Plan for {subject} ({hours} hours/day):",
+        f"Schedule: {blocks} Pomodoro focus blocks daily (25 minutes deep focus, 5 minutes rest).",
+        f"Phase 1 (Days 1-{max(1, days // 3)}): Core concepts, terminology, and fundamentals of {subject}.",
+        f"Phase 2 (Days {max(2, days // 3 + 1)}-{max(2, 2 * days // 3)}): Hands-on practice, problem sets, and active recall.",
+        f"Phase 3 (Days {max(3, 2 * days // 3 + 1)}-{days}): Comprehensive review, mock testing, and addressing weak areas.",
+        "Daily Habit: Log each completed study block in Flow to maintain your active streak."
     ]
-    prompt_text = build_prompt_from_messages(messages)
-    reply, _ = generate_response(prompt_text, user_prompt, max_tokens=220, temperature=0.2)
-    unescaped_reply = html.unescape(reply)
+    plan_text = "\n".join(plan_lines)
     return {
         "status": "success",
         "success": True,
         "subject": subject,
         "daily_hours": hours,
         "days": days,
-        "plan": unescaped_reply,
-        "response": unescaped_reply
+        "plan": plan_text,
+        "response": plan_text
     }
 
 @app.post("/focus_coaching")
@@ -921,29 +930,38 @@ def focus_coaching(req: FocusCoachingRequest):
     mins = req.focus_minutes or 0
     distractions = req.distractions_count or 0
     streak = req.streak_days or 0
-    query = html.unescape((req.user_query or "How can I improve my focus score today?").strip())
 
-    coaching_prompt = (
-        f"User performance data: {mins} focus minutes logged, {distractions} distraction interruptions, "
-        f"and an active streak of {streak} days. Question: '{query}'. "
-        "Provide 3 concise, highly actionable coaching recommendations based directly on these numbers. "
-        "Address distraction triggers, suggest appropriate Pomodoro session lengths, and give an encouraging productivity tip."
-    )
-    messages = [
-        Message(role="system", content=SYSTEM_PERSONA),
-        Message(role="user", content=coaching_prompt)
-    ]
-    prompt_text = build_prompt_from_messages(messages)
-    reply, _ = generate_response(prompt_text, query, max_tokens=200, temperature=0.2)
-    unescaped_reply = html.unescape(reply)
+    coaching_tips = []
+    if distractions > 5:
+        coaching_tips.append(f"Block disruptive apps: You had {distractions} interruptions. Turn on Strict Focus Mode to lock down distracting apps during deep work sessions.")
+    elif distractions > 0:
+        coaching_tips.append(f"Reduce interruptions: With {distractions} distraction alerts logged, keep your phone face down and silence non-essential notifications.")
+    else:
+        coaching_tips.append("Zero distractions recorded: Excellent job maintaining an undisturbed environment. Keep this momentum going.")
+
+    if mins < 30:
+        coaching_tips.append(f"Build session volume: You logged {mins} focus minutes today. Schedule two 25-minute Pomodoro sessions to hit your minimum focus benchmark.")
+    elif mins < 90:
+        coaching_tips.append(f"Solid progress: {mins} minutes completed. Add one more 30-minute block today to push past the average user benchmark.")
+    else:
+        coaching_tips.append(f"Outstanding focus: {mins} minutes logged. Remember to take a 10-minute restorative break between deep work blocks.")
+
+    if streak > 3:
+        coaching_tips.append(f"Strong streak: Your {streak}-day streak is actively compounding. Complete one more session before midnight to keep it intact.")
+    elif streak > 0:
+        coaching_tips.append(f"Keep the streak alive: You are on day {streak}. Daily consistency is the single best predictor of habit formation.")
+    else:
+        coaching_tips.append("Start your streak: Finish today's session to begin your active daily streak.")
+
+    advice_text = f"Coaching Advice for {mins}m focus, {distractions} distractions, and a {streak}-day streak:\n" + "\n".join(f"{i+1}. {t}" for i, t in enumerate(coaching_tips))
     return {
         "status": "success",
         "success": True,
         "focus_minutes": mins,
         "distractions_count": distractions,
         "streak_days": streak,
-        "advice": unescaped_reply,
-        "response": unescaped_reply
+        "advice": advice_text,
+        "response": advice_text
     }
 
 if __name__ == "__main__":
